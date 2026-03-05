@@ -1,14 +1,27 @@
+{% set k8s_version_parts = cluster.k8s_version.split('.') %}
+{% set k8s_major = k8s_version_parts[0]|int %}
+{% set k8s_minor = k8s_version_parts[1]|int if k8s_version_parts|length > 1 else 0 %}
+{% if (k8s_major == 1 and k8s_minor >= 32) or k8s_major >= 2 %}
+{% set api_version = "kubeadm.k8s.io/v1beta4" %}
+{% elif (k8s_major == 1 and k8s_minor >= 23) %}
+{% set api_version = "kubeadm.k8s.io/v1beta3" %}
+{% elif k8s_major == 1 and k8s_minor == 22 %}
+{% set api_version = "kubeadm.k8s.io/v1beta2" %}
+{% elif (k8s_major == 1 and k8s_minor >= 15) %}
+{% set api_version = "kubeadm.k8s.io/v1beta1" %}
+{% else %}
+{% set api_version = "kubeadm.k8s.io/v1alpha3" %}
+{% endif %}
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: {{ api_version }}
 kind: InitConfiguration
 localAPIEndpoint:
   advertiseAddress: {{ hostvars[groups['masters'][0]]['ansible_facts']['default_ipv4']['address'] }}
   bindPort: 6443
 
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: {{ api_version }}
 kind: ClusterConfiguration
-kubernetesVersion: v{{ cluster.k8s_version }}
 controlPlaneEndpoint: {{ cluster.control_plane.endpoint_vip }}:{{ cluster.control_plane.endpoint_port }}
 networking:
   serviceSubnet: {{ cluster.networking.service_cidr | default('10.0.0.0/24') }}
