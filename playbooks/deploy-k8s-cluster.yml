@@ -68,7 +68,7 @@
       debug:
         msg: |
           Initializing Kubernetes Control Plane on: {{ inventory_hostname }}
-          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+          IP: {{ hostvars[inventory_hostname]['ansible_facts']['default_ipv4']['address'] }}
 
   roles:
     - role: master
@@ -110,9 +110,30 @@
       debug:
         msg: |
           Joining Control Plane Node: {{ inventory_hostname }}
-          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+          IP: {{ hostvars[inventory_hostname]['ansible_facts']['default_ipv4']['address'] }}
 
   tasks:
+    - name: Verify first master is ready for joining
+      block:
+        - name: Check if first master has admin.conf
+          stat:
+            path: /etc/kubernetes/admin.conf
+          register: first_master_ready
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+        
+        - name: Ensure first master API is responding
+          command: |
+            kubectl get nodes
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: api_check
+          until: api_check.rc == 0
+          retries: 10
+          delay: 5
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+    
     - name: Get certificate key for joining
       shell: |
         kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -vw phase | tail -1
@@ -192,9 +213,30 @@
       debug:
         msg: |
           Deploying Worker Node: {{ inventory_hostname }}
-          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+          IP: {{ hostvars[inventory_hostname]['ansible_facts']['default_ipv4']['address'] }}
 
   tasks:
+    - name: Verify first master is ready for worker joining
+      block:
+        - name: Check if first master has admin.conf
+          stat:
+            path: /etc/kubernetes/admin.conf
+          register: first_master_ready
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+        
+        - name: Ensure first master API is responding
+          command: |
+            kubectl get nodes
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: api_check
+          until: api_check.rc == 0
+          retries: 10
+          delay: 5
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+    
     - name: Check if already joined
       stat:
         path: /etc/kubernetes/kubelet.conf
