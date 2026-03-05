@@ -64,6 +64,7 @@
       apt:
         update_cache: yes
         cache_valid_time: 3600
+      when: not ansible_check_mode
 
     - name: Install Docker packages (docker-ce)
       apt:
@@ -74,28 +75,32 @@
           - docker-buildx-plugin
           - docker-compose-plugin
         state: present
+      when: not ansible_check_mode
 
     - name: Enable and start Docker service
       systemd:
         name: docker
         enabled: yes
         state: started
+      when: not ansible_check_mode
 
     - name: Verify Docker installation
       command: docker --version
       register: docker_version
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Verify Docker Compose installation
       command: docker compose version
       register: compose_version
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Display Docker versions
       debug:
         msg: |
-          Docker: {{ docker_version.stdout }}
-          Docker Compose: {{ compose_version.stdout }}
+          Docker: {{ docker_version.stdout | default('Not installed in check mode') }}
+          Docker Compose: {{ compose_version.stdout | default('Not installed in check mode') }}
 
 - name: Configure Docker proxy settings
   block:
@@ -118,9 +123,11 @@
     - name: Reload systemd daemon
       systemd:
         daemon_reload: yes
+  when: not ansible_check_mode
 
 - name: Add docker to startup
   systemd:
     name: docker
     enabled: yes
     state: restarted
+  when: not ansible_check_mode
