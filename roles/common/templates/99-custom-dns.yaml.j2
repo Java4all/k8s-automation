@@ -1,0 +1,16 @@
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: false
+      addresses:
+        - {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}/{{ (hostvars[inventory_hostname]['ansible_default_ipv4']['address'] + '/' + cluster.nodes.masters[0].netmask|default('255.255.240.0'))|ipaddr('prefix') }}
+      gateway4: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}
+      nameservers:
+        addresses:
+{% for dns in cluster.networking.dns_servers %}
+          - {{ dns }}
+{% endfor %}
+      routes:
+        - to: 0.0.0.0/0
+          via: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}

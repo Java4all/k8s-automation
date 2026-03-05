@@ -1,0 +1,14 @@
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+{% if cluster.proxy.enabled %}
+# HTTP/HTTPS Proxy Settings
+http_proxy="{{ cluster.proxy.http_proxy }}"
+https_proxy="{{ cluster.proxy.https_proxy }}"
+HTTP_PROXY="{{ cluster.proxy.http_proxy }}"
+HTTPS_PROXY="{{ cluster.proxy.https_proxy }}"
+
+# No-Proxy Settings - comprehensive list for Kubernetes
+no_proxy="{{ cluster.proxy.no_proxy_list|join(',') }},kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local,*.svc.cluster.local,.svc.cluster.local,{{ cluster.networking.pod_cidr }},{{ cluster.networking.service_cidr }}"
+NO_PROXY="{{ cluster.proxy.no_proxy_list|join(',') }},kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local,*.svc.cluster.local,.svc.cluster.local,{{ cluster.networking.pod_cidr }},{{ cluster.networking.service_cidr }}"
+{% else %}
+# Proxy disabled
+{% endif %}

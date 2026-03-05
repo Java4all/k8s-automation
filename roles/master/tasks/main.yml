@@ -1,0 +1,103 @@
+---
+- name: Initialize Kubernetes Master Node
+  block:
+    - name: Check if kubeadm has already run
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubeadm_status
+
+    - name: Initialize Kubernetes cluster on first master
+      block:
+        - name: Create kubeadm config file
+          template:
+            src: kubeadm-config.yaml.j2
+            dest: /tmp/kubeadm-config.yaml
+            owner: root
+            group: root
+            mode: '0600'
+
+        - name: Run kubeadm init
+          command: |
+            kubeadm init --config=/tmp/kubeadm-config.yaml --upload-certs
+          register: kubeadm_init
+          retries: 3
+          delay: 10
+
+        - name: Display kubeadm init output
+          debug:
+            msg: "{{ kubeadm_init.stdout }}"
+
+        - name: Extract certificate key
+          shell: |
+            kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -vw "phase" | tail -1
+          register: cert_key
+          changed_when: false
+
+      when: not kubeadm_status.stat.exists
+
+    - name: Configure kubectl access
+      block:
+        - name: Create .kube directory
+          file:
+            path: "{{ ansible_env.HOME }}/.kube"
+            state: directory
+            mode: '0755'
+
+        - name: Copy admin config
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: "{{ ansible_env.HOME }}/.kube/config"
+            owner: "{{ ansible_user_id }}"
+            group: "{{ ansible_user_gid }}"
+            mode: '0600'
+            remote_src: yes
+
+        - name: Fix kubeconfig permissions
+          file:
+            path: "{{ ansible_env.HOME }}/.kube/config"
+            owner: "{{ ansible_user_id }}"
+            group: "{{ ansible_user_gid }}"
+            mode: '0600'
+
+    - name: Wait for API server
+      block:
+        - name: Wait for Kubernetes API to be ready
+          command: kubectl get nodes
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          register: api_ready
+          until: api_ready.rc == 0
+          retries: 30
+          delay: 10
+          changed_when: false
+
+    - name: Check cluster status
+      command: |
+        kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: cluster_status
+      changed_when: false
+
+    - name: Display cluster status
+      debug:
+        msg: "{{ cluster_status.stdout }}"
+
+- name: Label master node
+  block:
+    - name: Get node name
+      shell: |
+        kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep {{ inventory_hostname }} | head -1
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: node_name
+      changed_when: false
+
+    - name: Label node as master
+      command: |
+        kubectl label nodes {{ node_name.stdout }} node-role.kubernetes.io/master=true --overwrite
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      when: node_name.stdout | length > 0
+      changed_when: false
+      ignore_errors: yes

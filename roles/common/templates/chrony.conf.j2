@@ -1,0 +1,33 @@
+# Chrony configuration for Kubernetes cluster
+
+{% for server in cluster.networking.ntp_servers %}
+server {{ server }} iburst
+{% endfor %}
+
+# This directive specify the location of the file containing ID/key pairs for
+# NTP authentication.
+keyfile /etc/chrony/chrony.keys
+
+# This directive specify the file into which chronyd will store the rate
+# information.
+driftfile /var/lib/chrony/chrony.drift
+
+# Uncomment the following line to turn logging on.
+#log measurements statistics tracking
+
+# Log files location.
+logdir /var/log/chrony
+
+# Stop bad clocks from running forever.
+maxupdateskew 100.0
+
+# This command may be used the correct way of synchronizing your computer
+# clock with NTP server(s).
+# For more information, visit https://chrony.tuxfamily.org/manual.html#manual
+makestep 1.0 -1
+
+# Get TAI-UTC offset and leap seconds from the system tz database.
+leapsectz right/UTC
+
+# Allow large clock adjustments
+tempcomp on

@@ -1,0 +1,4 @@
+[Service]
+Environment="HTTP_PROXY={{ cluster.proxy.http_proxy }}"
+Environment="HTTPS_PROXY={{ cluster.proxy.https_proxy }}"
+Environment="NO_PROXY={{ cluster.proxy.no_proxy_list|join(',') }}"

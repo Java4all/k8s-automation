@@ -1,0 +1,317 @@
+# GitLab CI/CD Pipeline for Kubernetes Cluster Deployment
+# 
+# This pipeline automates the deployment of a Kubernetes cluster using Ansible
+# Configuration is provided via a YAML file specified in the pipeline
+
+variables:
+  # Configuration file path
+  CONFIG_FILE: "config/cluster-config.yaml"
+  # Ansible settings
+  ANSIBLE_FORCE_COLOR: "true"
+  PYTHONUNBUFFERED: "true"
+
+stages:
+  - validate
+  - prepare
+  - deploy
+  - verify
+  - cleanup
+
+# Before script to setup environment
+before_script:
+  - apt-get update -qq
+  - apt-get install -y -qq ansible python3-pip python3-pyyaml curl jq openssh-client
+  - pip3 install --quiet pyyaml jinja2 netaddr
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+
+###############################################################################
+# VALIDATION STAGE
+###############################################################################
+
+validate:config:
+  stage: validate
+  image: ubuntu:24.04
+  script:
+    - echo "Validating cluster configuration file..."
+    - |
+      if [ ! -f "$CONFIG_FILE" ]; then
+        echo "ERROR: Config file $CONFIG_FILE not found!"
+        exit 1
+      fi
+    - |
+      echo "Checking YAML syntax..."
+      python3 -c "import yaml; yaml.safe_load(open('$CONFIG_FILE'))" || exit 1
+    - echo "✓ Configuration file is valid"
+    - |
+      echo ""
+      echo "Configuration Summary:"
+      python3 << 'EOF'
+      import yaml
+      with open('$CONFIG_FILE') as f:
+          config = yaml.safe_load(f)
+      print(f"Cluster: {config['cluster']['name']}")
+      print(f"Environment: {config['cluster']['environment']}")
+      print(f"Kubernetes Version: v{config['cluster']['k8s_version']}")
+      print(f"Control Plane VIP: {config['cluster']['control_plane']['endpoint_vip']}")
+      print(f"Pod Network: {config['cluster']['networking']['pod_cidr']}")
+      print(f"Masters: {len(config['nodes']['masters'])}")
+      print(f"Workers: {len(config['nodes']['workers'])}")
+      print(f"Proxy: {'Enabled' if config['cluster']['proxy']['enabled'] else 'Disabled'}")
+      EOF
+  artifacts:
+    reports:
+      dotenv: deploy.env
+  allow_failure: false
+
+validate:ssh:
+  stage: validate
+  image: ubuntu:24.04
+  script:
+    - echo "Validating SSH connectivity to nodes..."
+    - |
+      if [ -z "$SSH_PRIVATE_KEY" ]; then
+        echo "ERROR: SSH_PRIVATE_KEY variable not set!"
+        exit 1
+      fi
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -t rsa -H 10.0.32.10 >> ~/.ssh/known_hosts 2>/dev/null || true
+    - echo "✓ SSH configuration validated"
+  only:
+    - branches
+  allow_failure: false
+  tags:
+    - k8s-deployment
+
+validate:prerequisites:
+  stage: validate
+  image: ubuntu:24.04
+  script:
+    - echo "Validating deployment prerequisites..."
+    - |
+      # Check if required tools are available
+      command -v ansible-playbook >/dev/null 2>&1 || (echo "Ansible not found" && exit 1)
+      command -v python3 >/dev/null 2>&1 || (echo "Python3 not found" && exit 1)
+      echo "✓ All prerequisites met"
+    - ansible-playbook --version
+    - python3 --version
+  allow_failure: false
+
+###############################################################################
+# PREPARE STAGE
+###############################################################################
+
+prepare:inventory:
+  stage: prepare
+  image: ubuntu:24.04
+  script:
+    - echo "Generating inventory from configuration..."
+    - |
+      python3 inventories/inventory.py --config "$CONFIG_FILE" > /tmp/inventory.json || exit 1
+    - echo "✓ Inventory generated successfully"
+    - echo "Generated inventory:"
+    - cat /tmp/inventory.json | python3 -m json.tool | head -50
+  artifacts:
+    paths:
+      - /tmp/inventory.json
+    expire_in: 1 hour
+  allow_failure: false
+
+prepare:variables:
+  stage: prepare
+  image: ubuntu:24.04
+  script:
+    - echo "Preparing deployment variables..."
+    - |
+      python3 << 'PYEOF'
+      import yaml
+      import json
+      import os
+      
+      config_file = os.environ.get('CONFIG_FILE')
+      with open(config_file) as f:
+          config = yaml.safe_load(f)
+      
+      # Export critical variables for next stages
+      with open('deploy.env', 'a') as env_file:
+          env_file.write(f"CLUSTER_NAME={config['cluster']['name']}\n")
+          env_file.write(f"K8S_VERSION={config['cluster']['k8s_version']}\n")
+          env_file.write(f"NUM_MASTERS={len(config['nodes']['masters'])}\n")
+          env_file.write(f"NUM_WORKERS={len(config['nodes']['workers'])}\n")
+          env_file.write(f"CONTROL_PLANE_VIP={config['cluster']['control_plane']['endpoint_vip']}\n")
+          env_file.write(f"POD_CIDR={config['cluster']['networking']['pod_cidr']}\n")
+      
+      print("Variables exported successfully")
+      PYEOF
+    - cat deploy.env
+  artifacts:
+    reports:
+      dotenv: deploy.env
+    expire_in: 1 hour
+  allow_failure: false
+
+###############################################################################
+# DEPLOY STAGE
+###############################################################################
+
+deploy:kubernetes:
+  stage: deploy
+  image: ubuntu:24.04
+  script:
+    - echo "========================================="
+    - echo "Starting Kubernetes Cluster Deployment"
+    - echo "========================================="
+    - echo "Configuration: $CONFIG_FILE"
+    - |
+      # Setup SSH
+      echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+      chmod 600 ~/.ssh/id_rsa
+      ssh-keyscan -t rsa 10.0.32.10 10.0.32.11 10.0.32.12 10.0.32.2 10.0.32.3 10.0.32.4 >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      # Generate inventory
+      python3 inventories/inventory.py --config "$CONFIG_FILE" > /tmp/inventory.json
+    - |
+      # Run Ansible playbook
+      ansible-playbook \
+        --inventory /tmp/inventory.json \
+        --extra-vars "config_file=$CONFIG_FILE" \
+        --extra-vars '@'"$CONFIG_FILE" \
+        --verbose \
+        --timeout=600 \
+        playbooks/deploy-k8s-cluster.yml
+    - echo "✓ Kubernetes cluster deployment completed"
+  artifacts:
+    paths:
+      - /tmp/k8s-deployment-report.txt
+    expire_in: 7 days
+    when: always
+  only:
+    - branches
+  allow_failure: false
+  tags:
+    - k8s-deployment
+  timeout: 2 hours
+
+deploy:emergency:
+  stage: deploy
+  image: ubuntu:24.04
+  script:
+    - echo "Running emergency/maintenance deployment..."
+    - echo "This job can be used for emergency fixes or maintenance"
+    - echo "Placeholder for emergency deployment procedures"
+  only:
+    - schedules
+    - manual
+  when: manual
+  allow_failure: true
+
+###############################################################################
+# VERIFY STAGE
+###############################################################################
+
+verify:cluster:
+  stage: verify
+  image: ubuntu:24.04
+  script:
+    - echo "========================================="
+    - echo "Verifying Kubernetes Cluster"
+    - echo "========================================="
+    - |
+      # Setup SSH
+      echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+      chmod 600 ~/.ssh/id_rsa
+      ssh-keyscan -t rsa 10.0.32.10 >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      # Create verification playbook
+      cat > /tmp/verify.yml << 'PLAYEOF'
+      ---
+      - hosts: all
+        gather_facts: no
+        tasks:
+          - name: Verify nodes are reachable
+            ping:
+          
+          - name: Check Kubernetes API
+            shell: |
+              kubectl get nodes || echo "API not ready"
+            environment:
+              KUBECONFIG: /etc/kubernetes/admin.conf
+            delegate_to: "{{ groups['masters'][0] }}"
+            run_once: true
+      PLAYEOF
+    - |
+      python3 inventories/inventory.py --config "$CONFIG_FILE" > /tmp/inventory.json
+    - |
+      ansible-playbook \
+        --inventory /tmp/inventory.json \
+        /tmp/verify.yml \
+        --verbose
+    - echo "✓ Cluster verification completed"
+  artifacts:
+    reports:
+      dotenv: verify.env
+    expire_in: 7 days
+    when: always
+  only:
+    - branches
+  allow_failure: true
+  tags:
+    - k8s-deployment
+
+verify:health:
+  stage: verify
+  image: ubuntu:24.04
+  script:
+    - echo "Running cluster health checks..."
+    - |
+      echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+      chmod 600 ~/.ssh/id_rsa
+      ssh-keyscan -t rsa 10.0.32.10 >> ~/.ssh/known_hosts 2>/dev/null || true
+    - |
+      # SSH to master and run health checks
+      ssh -o StrictHostKeyChecking=no ubuntu@10.0.32.10 << 'SSHEOF'
+        echo "Checking cluster health..."
+        kubectl get nodes -o wide
+        echo ""
+        echo "Checking pod status..."
+        kubectl get pods --all-namespaces
+        echo ""
+        echo "Checking services..."
+        kubectl get svc --all-namespaces
+      SSHEOF
+    - echo "✓ Health checks completed"
+  only:
+    - branches
+  allow_failure: true
+  tags:
+    - k8s-deployment
+
+###############################################################################
+# CLEANUP STAGE
+###############################################################################
+
+cleanup:artifacts:
+  stage: cleanup
+  image: ubuntu:24.04
+  script:
+    - echo "Cleaning up temporary artifacts..."
+    - rm -f ~/.ssh/id_rsa
+    - echo "✓ Cleanup completed"
+  when: always
+  allow_failure: true
+
+success:notification:
+  stage: cleanup
+  image: ubuntu:24.04
+  script:
+    - echo "========================================="
+    - echo "DEPLOYMENT SUCCESSFUL"
+    - echo "========================================="
+    - echo "Cluster: $CLUSTER_NAME"
+    - echo "Kubernetes Version: v$K8S_VERSION"
+    - echo "Masters: $NUM_MASTERS"
+    - echo "Workers: $NUM_WORKERS"
+    - echo "========================================="
+  when: on_success
+  allow_failure: true

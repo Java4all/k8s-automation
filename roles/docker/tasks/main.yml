@@ -1,0 +1,55 @@
+---
+- name: Install Docker
+  block:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install docker.io
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Enable docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Verify docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Display docker version
+      debug:
+        msg: "Docker installed: {{ docker_version.stdout }}"
+
+- name: Configure Docker proxy settings
+  block:
+    - name: Create docker service directory
+      file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Create docker proxy config
+      template:
+        src: docker-proxy.conf.j2
+        dest: /etc/systemd/system/docker.service.d/http-proxy.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: cluster.proxy.enabled
+      notify: restart docker
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+- name: Add docker to startup
+  systemd:
+    name: docker
+    enabled: yes
+    state: restarted

@@ -1,0 +1,75 @@
+---
+- name: Join Worker Node to Kubernetes Cluster
+  block:
+    - name: Check if node is already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join to cluster
+      block:
+        - name: Get join command from first master
+          shell: |
+            kubeadm token create --print-join-command
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: join_command
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+
+        - name: Join worker node to cluster
+          shell: |
+            {{ join_command.stdout }}
+          register: join_result
+          retries: 3
+          delay: 10
+
+        - name: Display join result
+          debug:
+            msg: "{{ join_result.stdout }}"
+
+      when: not kubelet_conf.stat.exists
+
+    - name: Verify node has joined
+      block:
+        - name: Wait for kubelet to start
+          wait_for:
+            port: 10250
+            timeout: 300
+
+        - name: Create kubeconfig directory
+          file:
+            path: "{{ ansible_env.HOME }}/.kube"
+            state: directory
+            mode: '0755'
+
+    - name: Label worker node
+      block:
+        - name: Get kubeconfig for commands
+          shell: |
+            for i in {1..30}; do
+              if kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get nodes &>/dev/null; then
+                echo "ready"
+                break
+              fi
+              sleep 5
+            done
+          register: kubelet_ready
+          changed_when: false
+
+        - name: Wait for node to be ready in cluster
+          shell: |
+            kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: node_ready
+          until: node_ready.stdout == "True"
+          retries: 30
+          delay: 10
+          changed_when: false
+          ignore_errors: yes
+          delegate_to: "{{ groups['masters'][0] }}"
+
+    - name: Display worker node status
+      debug:
+        msg: "Worker node {{ inventory_hostname }} has been joined to the cluster"

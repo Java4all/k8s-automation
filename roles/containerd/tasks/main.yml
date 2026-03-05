@@ -1,0 +1,84 @@
+---
+- name: Install Containerd
+  block:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+
+- name: Configure Containerd
+  block:
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Generate default containerd config
+      command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Save containerd config
+      copy:
+        content: "{{ containerd_default_config.stdout }}"
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+
+    - name: Enable systemd cgroup in containerd config
+      lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '(\s+)SystemdCgroup = false'
+        line: '\1SystemdCgroup = true'
+        backrefs: yes
+
+- name: Configure Containerd proxy settings
+  block:
+    - name: Create containerd service.d directory
+      file:
+        path: /etc/systemd/system/containerd.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Create containerd proxy config
+      template:
+        src: containerd-proxy.conf.j2
+        dest: /etc/systemd/system/containerd.service.d/http-proxy.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: cluster.proxy.enabled
+      notify: restart containerd
+
+- name: Reload systemd and restart containerd
+  block:
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable containerd service
+      systemd:
+        name: containerd
+        enabled: yes
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+
+    - name: Verify containerd is running
+      systemd:
+        name: containerd
+      register: containerd_status
+
+    - name: Display containerd status
+      debug:
+        msg: "Containerd status: {{ containerd_status.status.ActiveState }}"

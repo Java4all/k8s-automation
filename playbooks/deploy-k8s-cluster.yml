@@ -1,0 +1,248 @@
+---
+# Main Kubernetes Cluster Deployment Playbook
+# This playbook orchestrates the complete k8s cluster setup
+
+- name: Setup all nodes prerequisites
+  hosts: all
+  become: yes
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Display cluster configuration
+      debug:
+        msg: |
+          Deploying Kubernetes Cluster:
+          - Cluster Name: {{ cluster.name }}
+          - Kubernetes Version: v{{ cluster.k8s_version }}
+          - Control Plane Endpoint: {{ cluster.control_plane.endpoint_vip }}
+          - Pod Network: {{ cluster.networking.pod_cidr }}
+          - Total Nodes: {{ (groups['masters'] | length) + (groups['workers'] | length) }}
+          - Masters: {{ groups['masters'] | length }}
+          - Workers: {{ groups['workers'] | length }}
+
+  roles:
+    - role: common
+      tags: [common, prerequisites]
+    - role: docker
+      tags: [docker, container-runtime]
+    - role: containerd
+      tags: [containerd, container-runtime]
+    - role: kubernetes
+      tags: [kubernetes, packages]
+
+- name: Reboot systems to apply kernel changes
+  hosts: all
+  become: yes
+  vars_files:
+    - "{{ config_file }}"
+  tasks:
+    - name: Reboot systems
+      reboot:
+        msg: "Rebooting to apply system changes (GRUB, apparmor, etc.)"
+        connect_timeout: 5
+        reboot_timeout: 600
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+
+    - name: Wait for systems to come back up
+      wait_for_connection:
+        delay: 30
+        timeout: 300
+
+    - name: Verify systems are up
+      debug:
+        msg: "{{ inventory_hostname }} is back online"
+
+- name: Deploy first master node (Control Plane)
+  hosts: "{{ groups['masters'][0] }}"
+  become: yes
+  serial: 1
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  pre_tasks:
+    - name: Display master initialization info
+      debug:
+        msg: |
+          Initializing Kubernetes Control Plane on: {{ inventory_hostname }}
+          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+
+  roles:
+    - role: master
+      tags: [master, init]
+
+  post_tasks:
+    - name: Wait for master to be ready
+      shell: |
+        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: master_ready
+      until: master_ready.stdout == "True"
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+- name: Deploy Calico CNI
+  hosts: "{{ groups['masters'][0] }}"
+  become: yes
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  roles:
+    - role: calico
+      tags: [calico, cni]
+
+- name: Deploy additional master nodes
+  hosts: "{{ groups['masters'][1:] }}"
+  become: yes
+  serial: 1
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  pre_tasks:
+    - name: Display master node info
+      debug:
+        msg: |
+          Joining Control Plane Node: {{ inventory_hostname }}
+          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+
+  tasks:
+    - name: Get certificate key for joining
+      shell: |
+        kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -vw phase | tail -1
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cert_key_new
+      delegate_to: "{{ groups['masters'][0] }}"
+      become: yes
+
+    - name: Copy certificate from first master
+      block:
+        - name: Check if kubelet config exists
+          stat:
+            path: /etc/kubernetes/kubelet.conf
+          register: kubelet_check
+
+        - name: Join to cluster
+          block:
+            - name: Get updated join command
+              shell: |
+                kubeadm token create --print-join-command
+              environment:
+                KUBECONFIG: /etc/kubernetes/admin.conf
+              register: new_join_command
+              delegate_to: "{{ groups['masters'][0] }}"
+              become: yes
+
+            - name: Join master node
+              shell: |
+                {{ new_join_command.stdout }} --control-plane --certificate-key {{ cert_key_new.stdout }}
+              register: join_result
+
+            - name: Display join result
+              debug:
+                msg: "{{ join_result.stdout }}"
+
+          when: not kubelet_check.stat.exists
+
+    - name: Configure kubectl
+      block:
+        - name: Create .kube directory
+          file:
+            path: "{{ ansible_env.HOME }}/.kube"
+            state: directory
+            mode: '0755'
+
+        - name: Copy admin config
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: "{{ ansible_env.HOME }}/.kube/config"
+            owner: "{{ ansible_user_id }}"
+            group: "{{ ansible_user_gid }}"
+            mode: '0600'
+            remote_src: yes
+
+    - name: Wait for node to be ready
+      shell: |
+        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: node_ready
+      until: node_ready.stdout == "True"
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+
+- name: Deploy worker nodes
+  hosts: "{{ groups['workers'] }}"
+  become: yes
+  serial: "{{ cluster.deployment.parallel_workers | default(1) }}"
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  pre_tasks:
+    - name: Display worker node info
+      debug:
+        msg: |
+          Deploying Worker Node: {{ inventory_hostname }}
+          IP: {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}
+
+  tasks:
+    - name: Check if already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Get join command from first master
+      block:
+        - name: Get updated join command
+          shell: |
+            kubeadm token create --print-join-command
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: join_command
+          delegate_to: "{{ groups['masters'][0] }}"
+          become: yes
+
+        - name: Join worker node
+          shell: |
+            {{ join_command.stdout }}
+          register: join_result
+          retries: 3
+          delay: 10
+
+        - name: Display join result
+          debug:
+            msg: "{{ join_result.stdout }}"
+
+      when: not kubelet_conf.stat.exists
+
+    - name: Wait for worker to be ready
+      shell: |
+        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: worker_ready
+      until: worker_ready.stdout == "True"
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+      delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Post-deployment verification
+  hosts: "{{ groups['masters'][0] }}"
+  become: yes
+  vars_files:
+    - "{{ config_file }}"
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  roles:
+    - role: verification
+      tags: [verification, health-check]

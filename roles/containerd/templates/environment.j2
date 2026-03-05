@@ -1,0 +1,9 @@
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+{% if cluster.proxy.enabled %}
+http_proxy="{{ cluster.proxy.http_proxy }}"
+https_proxy="{{ cluster.proxy.https_proxy }}"
+no_proxy="{{ cluster.proxy.no_proxy_list|join(',') }}"
+HTTP_PROXY="{{ cluster.proxy.http_proxy }}"
+HTTPS_PROXY="{{ cluster.proxy.https_proxy }}"
+NO_PROXY="{{ cluster.proxy.no_proxy_list|join(',') }}"
+{% endif %}

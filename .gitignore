@@ -1,0 +1,76 @@
+# Ansible
+*.pyc
+__pycache__/
+*.retry
+.ansible/
+*.cfg.bak
+
+# SSH
+.ssh/
+*.pub
+*.pem
+
+# Configuration
+config/cluster-config.yaml
+config/*.yaml
+!config/cluster-config.example.yaml
+
+# Logs
+*.log
+logs/
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Kubernetes
+kubeconfig
+admin.conf
+*.kubeconfig
+.kube/
+
+# CI/CD
+.gitlab-runner/
+.gitlab/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+inventory.json
+inventory.*.json
+
+# Sensitive data
+vault_pass
+vault_password
+*.key
+*.crt
+*.pem
+*.key.bak
+
+# Test files
+test-results/
+*.test
+
+# Documentation
+docs/generated/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Docker
+.docker/
+.dockerignore

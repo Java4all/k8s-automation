@@ -1,0 +1,121 @@
+---
+- name: Install Calico Network Plugin
+  block:
+    - name: Check if Calico is already installed
+      shell: |
+        kubectl get namespace tigera-operator &>/dev/null && echo "installed" || echo "not-installed"
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: calico_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Install Calico Operator
+      block:
+        - name: Create Calico CRDs
+          command: |
+            kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ cluster.calico.version }}/manifests/operator-crds.yaml
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          register: calico_crds
+          retries: 3
+          delay: 10
+
+        - name: Create Tigera Operator
+          command: |
+            kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/{{ cluster.calico.version }}/manifests/tigera-operator.yaml
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          register: tigera_operator
+          retries: 3
+          delay: 10
+
+        - name: Wait for Tigera Operator to be ready
+          shell: |
+            kubectl -n tigera-operator wait --for=condition=ready pod -l k8s-app=tigera-operator --timeout=300s
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          retries: 3
+          delay: 10
+          ignore_errors: yes
+
+        - name: Download custom resources
+          shell: |
+            curl -O https://raw.githubusercontent.com/projectcalico/calico/{{ cluster.calico.version }}/manifests/custom-resources.yaml
+          args:
+            chdir: /tmp
+            creates: /tmp/custom-resources.yaml
+          retries: 3
+          delay: 10
+
+        - name: Update custom resources with pod CIDR
+          lineinfile:
+            path: /tmp/custom-resources.yaml
+            regexp: '(\s+)cidr:\s+192\.168\.0\.0/16'
+            line: '\1cidr: {{ cluster.calico.pool_cidr }}'
+
+        - name: Apply custom resources
+          command: |
+            kubectl apply -f /tmp/custom-resources.yaml
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          register: calico_resources
+          retries: 3
+          delay: 10
+
+      when: calico_status.stdout != "installed"
+
+    - name: Wait for Calico pods to be running
+      block:
+        - name: Wait for calico-node pods
+          shell: |
+            kubectl -n calico-system wait --for=condition=ready pod -l k8s-app=calico-node --timeout={{ cluster.deployment.calico_wait_timeout }}s
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          retries: 3
+          delay: 10
+
+        - name: Wait for other calico pods
+          shell: |
+            kubectl -n calico-system wait --for=condition=ready pod --all --timeout={{ cluster.deployment.calico_wait_timeout }}s
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          ignore_errors: yes
+
+        - name: Check Calico pod status
+          command: |
+            kubectl get pods -n calico-system
+          environment:
+            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          register: calico_pods
+          changed_when: false
+
+        - name: Display Calico pod status
+          debug:
+            msg: "{{ calico_pods.stdout }}"
+
+- name: Verify cluster networking
+  block:
+    - name: Check cluster nodes
+      command: |
+        kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: nodes_status
+      changed_when: false
+
+    - name: Display nodes status
+      debug:
+        msg: "{{ nodes_status.stdout }}"
+
+    - name: Check all pods
+      command: |
+        kubectl get pods --all-namespaces
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: all_pods
+      changed_when: false
+
+    - name: Display all pods
+      debug:
+        msg: "{{ all_pods.stdout }}"

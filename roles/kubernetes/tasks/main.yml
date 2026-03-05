@@ -1,0 +1,122 @@
+---
+- name: Install Kubernetes packages
+  block:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Download Kubernetes GPG key
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: k8s_key_download
+      retries: 3
+      delay: 10
+
+    - name: Set permissions on GPG key
+      file:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+
+    - name: Add Kubernetes APT repository
+      shell: |
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+      args:
+        creates: /etc/apt/sources.list.d/kubernetes.list
+
+    - name: Set permissions on Kubernetes repo file
+      file:
+        path: /etc/apt/sources.list.d/kubernetes.list
+        mode: '0644'
+
+    - name: Update package cache again
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install kubernetes packages
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        allow_unauthenticated: no
+
+    - name: Hold kubernetes packages to prevent auto-update
+      shell: |
+        apt-mark hold kubelet kubeadm kubectl
+      changed_when: false
+
+    - name: Verify kubernetes installation
+      shell: |
+        apt --installed list | grep -i kube
+      register: kube_packages
+      changed_when: false
+
+    - name: Display kubernetes packages
+      debug:
+        msg: "{{ kube_packages.stdout_lines }}"
+
+- name: Configure Kubernetes system requirements
+  block:
+    - name: Disable AppArmor
+      block:
+        - name: Read current GRUB cmdline
+          shell: grep "^GRUB_CMDLINE_LINUX=" /etc/default/grub | cut -d'"' -f2
+          register: grub_current
+          changed_when: false
+
+        - name: Check if apparmor=0 is already set
+          shell: grep -q "apparmor=0" /etc/default/grub
+          register: apparmor_check
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Disable apparmor in GRUB
+          lineinfile:
+            path: /etc/default/grub
+            regexp: '^GRUB_CMDLINE_LINUX="(.*?)"'
+            line: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
+            backrefs: yes
+          when: apparmor_check.rc != 0
+
+        - name: Update GRUB configuration
+          command: update-grub
+          register: grub_update
+          changed_when: "'Nothing to do' not in grub_update.stdout"
+
+    - name: Configure kubelet service for proxy
+      block:
+        - name: Create kubelet service directory
+          file:
+            path: /etc/systemd/system/kubelet.service.d
+            state: directory
+            mode: '0755'
+
+        - name: Create kubelet environment config
+          template:
+            src: kubelet-env.conf.j2
+            dest: /etc/systemd/system/kubelet.service.d/proxy.conf
+            owner: root
+            group: root
+            mode: '0644'
+          when: cluster.proxy.enabled
+
+    - name: Enable kubectl bash completion
+      block:
+        - name: Check if kubectl completion is installed
+          shell: grep -q "kubectl completion bash" ~/.bashrc
+          register: kubectl_completion
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Add kubectl completion to bashrc
+          shell: echo 'source <(kubectl completion bash)' >> ~/.bashrc
+          when: kubectl_completion.rc != 0
+
+- name: System restart required notification
+  debug:
+    msg: "IMPORTANT: System will be rebooted to apply GRUB changes. This will happen next in the playbook sequence."

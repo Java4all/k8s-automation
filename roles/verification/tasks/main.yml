@@ -1,0 +1,246 @@
+---
+- name: Post-Deployment Verification
+  block:
+    - name: Verify system after reboot
+      block:
+        - name: Check system uptime
+          shell: uptime
+          register: uptime
+          changed_when: false
+
+        - name: Check kernel version
+          command: uname -r
+          register: kernel_version
+          changed_when: false
+
+        - name: Check loaded modules
+          shell: lsmod | grep -E "overlay|br_netfilter"
+          register: modules
+          changed_when: false
+
+        - name: Display system info
+          debug:
+            msg: |
+              System Uptime: {{ uptime.stdout }}
+              Kernel Version: {{ kernel_version.stdout }}
+              Modules Loaded: {{ modules.stdout }}
+
+    - name: Verify container runtime
+      block:
+        - name: Check docker status
+          systemd:
+            name: docker
+          register: docker_status
+
+        - name: Check containerd status
+          systemd:
+            name: containerd
+          register: containerd_status
+
+        - name: Verify containerd socket
+          stat:
+            path: /run/containerd/containerd.sock
+          register: containerd_socket
+
+        - name: Display container runtime status
+          debug:
+            msg: |
+              Docker Status: {{ docker_status.status.ActiveState }}
+              Containerd Status: {{ containerd_status.status.ActiveState }}
+              Containerd Socket: {{ "Ready" if containerd_socket.stat.exists else "Not Found" }}
+
+    - name: Verify Kubernetes packages
+      block:
+        - name: Check kubelet version
+          command: kubelet --version
+          register: kubelet_version
+          changed_when: false
+
+        - name: Check kubeadm version
+          command: kubeadm version -o short
+          register: kubeadm_version
+          changed_when: false
+
+        - name: Check kubectl version
+          command: kubectl version --client --short
+          register: kubectl_version
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Display Kubernetes versions
+          debug:
+            msg: |
+              Kubelet: {{ kubelet_version.stdout }}
+              Kubeadm: {{ kubeadm_version.stdout }}
+              Kubectl: {{ kubectl_version.stdout | default('Not available yet') }}
+
+    - name: Verify Kubernetes cluster status
+      block:
+        - name: Get cluster info
+          command: |
+            kubectl cluster-info
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: cluster_info
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Get nodes status
+          command: |
+            kubectl get nodes -o wide
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: nodes_status
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Get pod status
+          command: |
+            kubectl get pods --all-namespaces
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: pods_status
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Check if all nodes are ready
+          shell: |
+            kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v True
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: not_ready_nodes
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Display cluster status
+          debug:
+            msg: |
+              Cluster Info:
+              {{ cluster_info.stdout | default('Not available') }}
+              
+              Nodes Status:
+              {{ nodes_status.stdout | default('Not available') }}
+              
+              Pods Status:
+              {{ pods_status.stdout | default('Not available') }}
+
+        - name: Verify proxy configuration (if enabled)
+  block:
+    - name: Check system-wide proxy settings
+      shell: |
+        echo "=== System Proxy Settings ==="
+        grep -E "^(http_proxy|https_proxy|no_proxy)" /etc/environment || echo "No proxy in /etc/environment"
+      register: system_proxy
+      changed_when: false
+
+    - name: Check docker proxy settings
+      shell: |
+        echo "=== Docker Proxy Settings ==="
+        cat /etc/systemd/system/docker.service.d/http-proxy.conf 2>/dev/null || echo "No docker proxy config"
+      register: docker_proxy
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check containerd proxy settings
+      shell: |
+        echo "=== Containerd Proxy Settings ==="
+        cat /etc/systemd/system/containerd.service.d/http-proxy.conf 2>/dev/null || echo "No containerd proxy config"
+      register: containerd_proxy
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check kubelet proxy settings
+      shell: |
+        echo "=== Kubelet Proxy Settings ==="
+        cat /etc/systemd/system/kubelet.service.d/proxy.conf 2>/dev/null || echo "No kubelet proxy config"
+      register: kubelet_proxy
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display proxy verification results
+      debug:
+        msg: |
+          Proxy Configuration Verification:
+          
+          {{ system_proxy.stdout }}
+          
+          {{ docker_proxy.stdout }}
+          
+          {{ containerd_proxy.stdout }}
+          
+          {{ kubelet_proxy.stdout }}
+  when: cluster.proxy.enabled
+
+- name: Cluster health summary
+          block:
+            - name: Count ready nodes
+              shell: |
+                kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready" && @.status=="True")]}' | wc -w
+              environment:
+                KUBECONFIG: /etc/kubernetes/admin.conf
+              register: ready_nodes_count
+              changed_when: false
+              ignore_errors: yes
+
+            - name: Display health summary
+              debug:
+                msg: |
+                  ============================================
+                  KUBERNETES CLUSTER HEALTH SUMMARY
+                  ============================================
+                  Ready Nodes: {{ ready_nodes_count.stdout | default('Unknown') }}
+                  Expected Nodes: {{ (groups['masters'] | length) + (groups['workers'] | length) }}
+                  ============================================
+
+- name: Generate verification report
+  block:
+    - name: Create verification report
+      copy:
+        content: |
+          # Kubernetes Cluster Deployment Report
+          Generated: {{ ansible_date_time.iso8601 }}
+          Environment: {{ cluster.environment }}
+          
+          ## Cluster Information
+          - Cluster Name: {{ cluster.name }}
+          - Kubernetes Version: v{{ cluster.k8s_version }}
+          - Control Plane Endpoint: {{ cluster.control_plane.endpoint_vip }}:{{ cluster.control_plane.endpoint_port }}
+          - Pod Network CIDR: {{ cluster.networking.pod_cidr }}
+          - Service Network CIDR: {{ cluster.networking.service_cidr | default('10.0.0.0/24') }}
+          
+          ## Nodes Deployed
+          ### Masters
+          {% for master in groups['masters'] %}
+          - {{ master }}: {{ hostvars[master]['ansible_default_ipv4']['address'] }}
+          {% endfor %}
+          
+          ### Workers
+          {% for worker in groups['workers'] %}
+          - {{ worker }}: {{ hostvars[worker]['ansible_default_ipv4']['address'] }}
+          {% endfor %}
+          
+          ## Network Plugin
+          - CNI: Calico {{ cluster.calico.version }}
+          
+          ## System Configuration
+          - OS: Ubuntu 24.04.3 LTS
+          - Container Runtime: Containerd + Docker
+          - Swap Disabled: Yes
+          - AppArmor Disabled: Yes
+          - Kernel Modules: overlay, br_netfilter
+          
+          ## Status
+          - Deployment Time: {{ ansible_date_time.iso8601 }}
+          - Status: Completed
+        dest: /tmp/k8s-deployment-report.txt
+      delegate_to: localhost
+      become: no
+
+    - name: Display verification completion
+      debug:
+        msg: |
+          ============================================
+          KUBERNETES CLUSTER DEPLOYMENT COMPLETE
+          ============================================
+          Verification report saved to: /tmp/k8s-deployment-report.txt
+          ============================================
