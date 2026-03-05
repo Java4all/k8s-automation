@@ -7,18 +7,42 @@
         state: directory
         mode: '0755'
 
+    - name: Verify curl is available
+      command: which curl
+      changed_when: false
+
+    - name: Verify gpg is available
+      command: which gpg
+      changed_when: false
+
+    - name: Test network connectivity to Docker repository
+      shell: |
+        curl -I --connect-timeout 5 https://download.docker.com/linux/ubuntu/gpg 2>&1 | head -1
+      register: network_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display network test result
+      debug:
+        msg: "Network connectivity: {{ network_test.stdout }}"
+
     - name: Add Docker GPG key
       shell: |
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-      args:
-        creates: /etc/apt/keyrings/docker.gpg
+        if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+          echo "ERROR: Failed to create docker.gpg"
+          exit 1
+        fi
       retries: 3
       delay: 10
+      register: gpg_key_result
+      check_mode: no
 
     - name: Set Docker GPG key permissions
       file:
         path: /etc/apt/keyrings/docker.gpg
         mode: '0644'
+      when: not ansible_check_mode
 
     - name: Get system architecture
       command: dpkg --print-architecture
