@@ -17,7 +17,7 @@ def generate_inventory(config):
     inventory = {
         'all': {
             'hosts': {},
-            'children': ['masters', 'workers']
+            'children': {'masters': {}, 'workers': {}}
         },
         'masters': {
             'hosts': {}

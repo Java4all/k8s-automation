@@ -125,72 +125,72 @@
               {{ pods_status.stdout | default('Not available') }}
 
         - name: Verify proxy configuration (if enabled)
-  block:
-    - name: Check system-wide proxy settings
-      shell: |
-        echo "=== System Proxy Settings ==="
-        grep -E "^(http_proxy|https_proxy|no_proxy)" /etc/environment || echo "No proxy in /etc/environment"
-      register: system_proxy
-      changed_when: false
-
-    - name: Check docker proxy settings
-      shell: |
-        echo "=== Docker Proxy Settings ==="
-        cat /etc/systemd/system/docker.service.d/http-proxy.conf 2>/dev/null || echo "No docker proxy config"
-      register: docker_proxy
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Check containerd proxy settings
-      shell: |
-        echo "=== Containerd Proxy Settings ==="
-        cat /etc/systemd/system/containerd.service.d/http-proxy.conf 2>/dev/null || echo "No containerd proxy config"
-      register: containerd_proxy
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Check kubelet proxy settings
-      shell: |
-        echo "=== Kubelet Proxy Settings ==="
-        cat /etc/systemd/system/kubelet.service.d/proxy.conf 2>/dev/null || echo "No kubelet proxy config"
-      register: kubelet_proxy
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Display proxy verification results
-      debug:
-        msg: |
-          Proxy Configuration Verification:
-          
-          {{ system_proxy.stdout }}
-          
-          {{ docker_proxy.stdout }}
-          
-          {{ containerd_proxy.stdout }}
-          
-          {{ kubelet_proxy.stdout }}
-  when: cluster.proxy.enabled
-
-- name: Cluster health summary
           block:
-            - name: Count ready nodes
+            - name: Check system-wide proxy settings
               shell: |
-                kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready" && @.status=="True")]}' | wc -w
-              environment:
-                KUBECONFIG: /etc/kubernetes/admin.conf
-              register: ready_nodes_count
+                echo "=== System Proxy Settings ==="
+                grep -E "^(http_proxy|https_proxy|no_proxy)" /etc/environment || echo "No proxy in /etc/environment"
+              register: system_proxy
+              changed_when: false
+
+            - name: Check docker proxy settings
+              shell: |
+                echo "=== Docker Proxy Settings ==="
+                cat /etc/systemd/system/docker.service.d/http-proxy.conf 2>/dev/null || echo "No docker proxy config"
+              register: docker_proxy
               changed_when: false
               ignore_errors: yes
 
-            - name: Display health summary
+            - name: Check containerd proxy settings
+              shell: |
+                echo "=== Containerd Proxy Settings ==="
+                cat /etc/systemd/system/containerd.service.d/http-proxy.conf 2>/dev/null || echo "No containerd proxy config"
+              register: containerd_proxy
+              changed_when: false
+              ignore_errors: yes
+
+            - name: Check kubelet proxy settings
+              shell: |
+                echo "=== Kubelet Proxy Settings ==="
+                cat /etc/systemd/system/kubelet.service.d/proxy.conf 2>/dev/null || echo "No kubelet proxy config"
+              register: kubelet_proxy
+              changed_when: false
+              ignore_errors: yes
+
+            - name: Display proxy verification results
               debug:
                 msg: |
-                  ============================================
-                  KUBERNETES CLUSTER HEALTH SUMMARY
-                  ============================================
-                  Ready Nodes: {{ ready_nodes_count.stdout | default('Unknown') }}
-                  Expected Nodes: {{ (groups['masters'] | length) + (groups['workers'] | length) }}
-                  ============================================
+                  Proxy Configuration Verification:
+                  
+                  {{ system_proxy.stdout }}
+                  
+                  {{ docker_proxy.stdout }}
+                  
+                  {{ containerd_proxy.stdout }}
+                  
+                  {{ kubelet_proxy.stdout }}
+          when: cluster.proxy.enabled
+
+- name: Cluster health summary
+  block:
+    - name: Count ready nodes
+      shell: |
+        kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready" && @.status=="True")]}' | wc -w
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: ready_nodes_count
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display health summary
+      debug:
+        msg: |
+          ============================================
+          KUBERNETES CLUSTER HEALTH SUMMARY
+          ============================================
+          Ready Nodes: {{ ready_nodes_count.stdout | default('Unknown') }}
+          Expected Nodes: {{ (groups['masters'] | length) + (groups['workers'] | length) }}
+          ============================================
 
 - name: Generate verification report
   block:
