@@ -25,8 +25,8 @@
     - name: Add Kubernetes APT repository
       shell: |
         echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
-      args:
-        creates: /etc/apt/sources.list.d/kubernetes.list
+      register: k8s_repo_added
+      changed_when: "'deb [signed' in k8s_repo_added.stdout"
 
     - name: Set permissions on Kubernetes repo file
       file:
@@ -34,11 +34,45 @@
         mode: '0644'
       when: not ansible_check_mode
 
+    - name: Verify Kubernetes GPG key exists
+      stat:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: k8s_gpg_key_stat
+      changed_when: false
+
+    - name: Display Kubernetes GPG key status
+      debug:
+        msg: |
+          Kubernetes GPG key status:
+          - Path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          - Exists: {{ k8s_gpg_key_stat.stat.exists }}
+          - Size: {{ k8s_gpg_key_stat.stat.size | default(0) }} bytes
+
+    - name: Remove stale Kubernetes repository file if GPG key missing
+      file:
+        path: /etc/apt/sources.list.d/kubernetes.list
+        state: absent
+      when: not k8s_gpg_key_stat.stat.exists
+
+    - name: Re-add Kubernetes repository if GPG key was missing
+      shell: |
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+      when: not k8s_gpg_key_stat.stat.exists
+      register: k8s_repo_re_added
+
     - name: Update package cache again
       apt:
         update_cache: yes
-        cache_valid_time: 3600
+        cache_valid_time: 0
       when: not ansible_check_mode
+      register: k8s_cache_update_result
+
+    - name: Display Kubernetes cache update status
+      debug:
+        msg: |
+          Kubernetes package cache update:
+          - Updated: {{ k8s_cache_update_result.cache_updated | default('N/A') }}
+          - Cache valid time: {{ k8s_cache_update_result.cache_update_time | default('N/A') }}
 
     - name: Install kubernetes packages
       apt:

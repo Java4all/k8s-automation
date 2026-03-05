@@ -57,14 +57,82 @@
     - name: Add Docker repository
       shell: |
         echo "deb [arch={{ system_arch.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ubuntu_release.stdout }} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      args:
-        creates: /etc/apt/sources.list.d/docker.list
+      register: repo_added
+      changed_when: "'deb [arch' in repo_added.stdout"
 
-    - name: Update package cache
+    - name: Verify Docker GPG key exists
+      stat:
+        path: /etc/apt/keyrings/docker.gpg
+      register: gpg_key_stat
+      changed_when: false
+
+    - name: Display Docker GPG key status
+      debug:
+        msg: |
+          Docker GPG key status:
+          - Path: /etc/apt/keyrings/docker.gpg
+          - Exists: {{ gpg_key_stat.stat.exists }}
+          - Size: {{ gpg_key_stat.stat.size | default(0) }} bytes
+          - Mode: {{ gpg_key_stat.stat.mode | default('N/A') }}
+
+    - name: Verify Docker repository file exists
+      stat:
+        path: /etc/apt/sources.list.d/docker.list
+      register: repo_file_stat
+      changed_when: false
+
+    - name: Display Docker repository file status
+      debug:
+        msg: |
+          Docker repository file status:
+          - Path: /etc/apt/sources.list.d/docker.list
+          - Exists: {{ repo_file_stat.stat.exists }}
+          - Size: {{ repo_file_stat.stat.size | default(0) }} bytes
+          - Content check needed if size > 0
+
+    - name: Verify apt sources are accessible
+      shell: |
+        apt-cache search docker-ce 2>&1 | head -5
+      register: apt_search_result
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display apt search result
+      debug:
+        msg: |
+          Docker packages search result:
+          {% if "docker-ce" in apt_search_result.stdout %}
+          ✓ docker-ce package found in apt cache
+          {% else %}
+          ✗ docker-ce package NOT found - repository may not be accessible
+          Details: {{ apt_search_result.stdout | default('No output') }}
+          {% endif %}
+
+    - name: Remove stale Docker repository file if GPG key missing
+      file:
+        path: /etc/apt/sources.list.d/docker.list
+        state: absent
+      when: not gpg_key_stat.stat.exists
+
+    - name: Re-add Docker repository if GPG key was missing
+      shell: |
+        echo "deb [arch={{ system_arch.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ubuntu_release.stdout }} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      when: not gpg_key_stat.stat.exists
+      register: repo_re_added
+
+    - name: Update package cache (forced)
       apt:
         update_cache: yes
-        cache_valid_time: 3600
+        cache_valid_time: 0
       when: not ansible_check_mode
+      register: cache_update_result
+
+    - name: Display cache update status
+      debug:
+        msg: |
+          Package cache update:
+          - Updated: {{ cache_update_result.cache_updated | default('N/A') }}
+          - Cache valid time: {{ cache_update_result.cache_update_time | default('N/A') }}
 
     - name: Install Docker packages (docker-ce)
       apt:
