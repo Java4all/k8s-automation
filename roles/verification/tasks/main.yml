@@ -198,7 +198,7 @@
       copy:
         content: |
           # Kubernetes Cluster Deployment Report
-          Generated: {{ ansible_date_time.iso8601 }}
+          Generated: {{ ansible_facts['date_time']['iso8601'] }}
           Environment: {{ cluster.environment }}
           
           ## Cluster Information
@@ -211,12 +211,12 @@
           ## Nodes Deployed
           ### Masters
           {% for master in groups['masters'] %}
-          - {{ master }}: {{ hostvars[master]['ansible_default_ipv4']['address'] }}
+          - {{ master }}: {{ hostvars[master]['ansible_facts']['default_ipv4']['address'] }}
           {% endfor %}
           
           ### Workers
           {% for worker in groups['workers'] %}
-          - {{ worker }}: {{ hostvars[worker]['ansible_default_ipv4']['address'] }}
+          - {{ worker }}: {{ hostvars[worker]['ansible_facts']['default_ipv4']['address'] }}
           {% endfor %}
           
           ## Network Plugin
@@ -230,7 +230,7 @@
           - Kernel Modules: overlay, br_netfilter
           
           ## Status
-          - Deployment Time: {{ ansible_date_time.iso8601 }}
+          - Deployment Time: {{ ansible_facts['date_time']['iso8601'] }}
           - Status: Completed
         dest: /tmp/k8s-deployment-report.txt
       delegate_to: localhost
