@@ -1,6 +1,6 @@
 # Chrony configuration for Kubernetes cluster
 
-{% for server in cluster.networking.ntp_servers %}
+{% for server in cluster.networking.ntp.servers %}
 server {{ server }} iburst
 {% endfor %}
 

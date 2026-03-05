@@ -8,7 +8,7 @@ network:
       gateway4: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}
       nameservers:
         addresses:
-{% for dns in cluster.networking.dns_servers %}
+{% for dns in cluster.networking.dns.servers %}
           - {{ dns }}
 {% endfor %}
       routes:

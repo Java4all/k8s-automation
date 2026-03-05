@@ -29,6 +29,7 @@
       command: netplan apply
       register: netplan_result
       failed_when: netplan_result.rc != 0
+  when: cluster.networking.dns.enabled | default(true)
 
 - name: Configure NTP
   block:
@@ -49,6 +50,7 @@
         name: chrony
         enabled: yes
         state: started
+  when: cluster.networking.ntp.enabled | default(true)
 
 - name: Disable nftables
   block:

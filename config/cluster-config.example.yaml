@@ -15,12 +15,20 @@ cluster:
   networking:
     pod_cidr: "10.0.68.0/21"        # Pod network CIDR
     service_cidr: "10.0.76.0/22"    # Service network CIDR (optional, defaults to 10.0.0.0/24)
-    dns_servers:
-      - "8.8.8.8"
-      - "8.8.4.4"
-    ntp_servers:
-      - "0.ubuntu.pool.ntp.org"
-      - "1.ubuntu.pool.ntp.org"
+    
+    # DNS Configuration (set enabled: false to skip DNS configuration)
+    dns:
+      enabled: true                  # Set to false if VMs already configured
+      servers:
+        - "8.8.8.8"
+        - "8.8.4.4"
+    
+    # NTP Configuration (set enabled: false to skip NTP configuration)
+    ntp:
+      enabled: true                  # Set to false if VMs already configured
+      servers:
+        - "0.ubuntu.pool.ntp.org"
+        - "1.ubuntu.pool.ntp.org"
 
   # Proxy Configuration (MANDATORY)
   proxy:
