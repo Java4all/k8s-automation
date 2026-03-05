@@ -19,6 +19,24 @@
 
 - name: Configure DNS servers
   block:
+    - name: Display network configuration mode
+      debug:
+        msg: |
+          Network Configuration Mode: {{ cluster.networking.mode | default('dhcp') | upper }}
+          {% if cluster.networking.mode == 'static' %}
+          - Using STATIC IP configuration
+          - Gateway: {{ cluster.networking.static.gateway | default('10.0.32.1') }}
+          - IP will be set to current address with CIDR prefix
+          {% else %}
+          - Using DHCP configuration
+          - IP assigned by DHCP server
+          {% if cluster.networking.dhcp.override_dns | default(true) %}
+          - DNS override enabled: will use custom DNS servers
+          {% else %}
+          - DNS override disabled: will use DHCP-provided DNS
+          {% endif %}
+          {% endif %}
+    
     - name: Create netplan config with DNS
       template:
         src: 99-custom-dns.yaml.j2

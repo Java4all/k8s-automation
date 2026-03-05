@@ -1,3 +1,5 @@
+{% if cluster.networking.mode == 'static' %}
+# Static IP Configuration
 network:
   version: 2
   ethernets:
@@ -5,7 +7,7 @@ network:
       dhcp4: false
       addresses:
         - {{ hostvars[inventory_hostname]['ansible_facts']['default_ipv4']['address'] }}/{{ hostvars[inventory_hostname].get('cidr_prefix', '20') }}
-      gateway4: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}
+      gateway4: {{ cluster.networking.static.gateway | default('10.0.32.1') }}
       nameservers:
         addresses:
 {% for dns in cluster.networking.dns.servers %}
@@ -13,4 +15,21 @@ network:
 {% endfor %}
       routes:
         - to: 0.0.0.0/0
-          via: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}
+          via: {{ cluster.networking.static.gateway | default('10.0.32.1') }}
+{% else %}
+# DHCP Configuration (default for cloud environments like Azure)
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: true
+{% if cluster.networking.dhcp.override_dns | default(true) %}
+      dhcp4-overrides:
+        use-dns: false
+      nameservers:
+        addresses:
+{% for dns in cluster.networking.dns.servers %}
+          - {{ dns }}
+{% endfor %}
+{% endif %}
+{% endif %}
