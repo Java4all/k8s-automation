@@ -23,6 +23,7 @@
       command: containerd config default
       register: containerd_default_config
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Save containerd config
       copy:
@@ -32,6 +33,7 @@
         group: root
         mode: '0644'
         backup: yes
+      when: not ansible_check_mode
 
     - name: Enable systemd cgroup in containerd config
       lineinfile:
@@ -39,6 +41,7 @@
         regexp: '(\s+)SystemdCgroup = false'
         line: '\1SystemdCgroup = true'
         backrefs: yes
+      when: not ansible_check_mode
 
 - name: Configure Containerd proxy settings
   block:
@@ -55,8 +58,9 @@
         owner: root
         group: root
         mode: '0644'
-      when: cluster.proxy.enabled
+      when: cluster.proxy.enabled and not ansible_check_mode
       notify: restart containerd
+  when: not ansible_check_mode
 
 - name: Reload systemd and restart containerd
   block:
@@ -81,4 +85,5 @@
 
     - name: Display containerd status
       debug:
-        msg: "Containerd status: {{ containerd_status.status.ActiveState }}"
+        msg: "Containerd status: {{ containerd_status.status.ActiveState | default('Not running in check mode') }}"
+  when: not ansible_check_mode

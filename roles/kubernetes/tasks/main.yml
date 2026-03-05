@@ -8,21 +8,23 @@
 
     - name: Download Kubernetes GPG key
       shell: |
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       args:
         creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
       register: k8s_key_download
       retries: 3
       delay: 10
+      check_mode: no
 
     - name: Set permissions on GPG key
       file:
         path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
         mode: '0644'
+      when: not ansible_check_mode
 
     - name: Add Kubernetes APT repository
       shell: |
-        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+        echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ cluster.k8s_version }}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
       args:
         creates: /etc/apt/sources.list.d/kubernetes.list
 
@@ -30,11 +32,13 @@
       file:
         path: /etc/apt/sources.list.d/kubernetes.list
         mode: '0644'
+      when: not ansible_check_mode
 
     - name: Update package cache again
       apt:
         update_cache: yes
         cache_valid_time: 3600
+      when: not ansible_check_mode
 
     - name: Install kubernetes packages
       apt:
@@ -44,21 +48,24 @@
           - kubectl
         state: present
         allow_unauthenticated: no
+      when: not ansible_check_mode
 
     - name: Hold kubernetes packages to prevent auto-update
       shell: |
         apt-mark hold kubelet kubeadm kubectl
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Verify kubernetes installation
       shell: |
         apt --installed list | grep -i kube
       register: kube_packages
       changed_when: false
+      when: not ansible_check_mode
 
     - name: Display kubernetes packages
       debug:
-        msg: "{{ kube_packages.stdout_lines }}"
+        msg: "{{ kube_packages.stdout_lines | default(['Not installed in check mode']) }}"
 
 - name: Configure Kubernetes system requirements
   block:
@@ -81,12 +88,14 @@
             regexp: '^GRUB_CMDLINE_LINUX="(.*?)"'
             line: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
             backrefs: yes
-          when: apparmor_check.rc != 0
+          when: apparmor_check.rc != 0 and not ansible_check_mode
 
         - name: Update GRUB configuration
           command: update-grub
           register: grub_update
           changed_when: "'Nothing to do' not in grub_update.stdout"
+          when: not ansible_check_mode
+      when: not ansible_check_mode
 
     - name: Configure kubelet service for proxy
       block:
@@ -104,6 +113,7 @@
             group: root
             mode: '0644'
           when: cluster.proxy.enabled
+      when: not ansible_check_mode
 
     - name: Enable kubectl bash completion
       block:
@@ -116,6 +126,7 @@
         - name: Add kubectl completion to bashrc
           shell: echo 'source <(kubectl completion bash)' >> ~/.bashrc
           when: kubectl_completion.rc != 0
+      when: not ansible_check_mode
 
 - name: System restart required notification
   debug:
