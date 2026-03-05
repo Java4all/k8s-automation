@@ -74,21 +74,18 @@ nodes:
       hostname: "vmm1"
       ip: "10.0.32.10"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "master"
       
     - name: "vmm2"
       hostname: "vmm2"
       ip: "10.0.32.11"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "master"
       
     - name: "vmm3"
       hostname: "vmm3"
       ip: "10.0.32.12"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "master"
 
   # Worker Nodes
@@ -97,21 +94,18 @@ nodes:
       hostname: "vmw1"
       ip: "10.0.32.2"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "worker"
       
     - name: "vmw2"
       hostname: "vmw2"
       ip: "10.0.32.3"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "worker"
       
     - name: "vmw3"
       hostname: "vmw3"
       ip: "10.0.32.4"
       netmask: "255.255.240.0"      # /20
-      gateway: "10.0.32.1"
       role: "worker"
 
 # System Configuration
