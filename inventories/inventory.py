@@ -8,6 +8,15 @@ import argparse
 import yaml
 import json
 import sys
+from ipaddress import IPv4Network
+
+def netmask_to_cidr(netmask):
+    """Convert netmask to CIDR prefix"""
+    try:
+        return str(IPv4Network(f'0.0.0.0/{netmask}').prefixlen)
+    except:
+        # Default to /20 if conversion fails (255.255.240.0 = /20)
+        return '20'
 
 def load_config(config_file):
     with open(config_file, 'r') as f:
@@ -46,7 +55,8 @@ def generate_inventory(config):
                 'ansible_host': master['ip'],
                 'ansible_user': config['ssh']['user'],
                 'node_ip': master['ip'],
-                'node_role': 'master'
+                'node_role': 'master',
+                'cidr_prefix': netmask_to_cidr(master.get('netmask', '255.255.240.0'))
             }
     
     # Add worker nodes
@@ -65,7 +75,8 @@ def generate_inventory(config):
                 'ansible_host': worker['ip'],
                 'ansible_user': config['ssh']['user'],
                 'node_ip': worker['ip'],
-                'node_role': 'worker'
+                'node_role': 'worker',
+                'cidr_prefix': netmask_to_cidr(worker.get('netmask', '255.255.240.0'))
             }
     
     return inventory

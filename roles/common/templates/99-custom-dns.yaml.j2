@@ -4,7 +4,7 @@ network:
     eth0:
       dhcp4: false
       addresses:
-        - {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}/{{ (hostvars[inventory_hostname]['ansible_default_ipv4']['address'] + '/' + cluster.nodes.masters[0].netmask|default('255.255.240.0'))|ipaddr('prefix') }}
+        - {{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}/{{ hostvars[inventory_hostname].get('cidr_prefix', '20') }}
       gateway4: {{ cluster.nodes.masters[0].gateway|default('10.0.32.1') }}
       nameservers:
         addresses:
