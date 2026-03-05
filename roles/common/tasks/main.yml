@@ -13,9 +13,9 @@
       - gnupg
     state: present
 
-- name: Set timezone
-  timezone:
-    name: "{{ cluster.system.timezone }}"
+- name: Set timezone to UTC
+  shell: timedatectl set-timezone UTC
+  changed_when: false
 
 - name: Configure DNS servers
   block:
