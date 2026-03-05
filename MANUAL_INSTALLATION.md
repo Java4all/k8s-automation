@@ -21,7 +21,7 @@
        --inventory inventory.json \
        --extra-vars '@config/cluster-config.yaml' \
        playbooks/deploy-k8s-cluster.yml \
-       -v
+       -v 2>&1 | tee deployment.log
 
 
 ## USEFUL COMMANDS
