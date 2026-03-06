@@ -32,7 +32,6 @@
             kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -vw "phase" | tail -1
           register: cert_key
           changed_when: false
-
       when: not kubeadm_status.stat.exists
 
     - name: Configure kubectl access
