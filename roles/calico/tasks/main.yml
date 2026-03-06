@@ -3,14 +3,23 @@
   block:
     - name: Check if Calico is already installed
       shell: |
-        # Calico is only considered "installed" if calico-system namespace exists
-        # This namespace is created as the final step of Calico deployment
-        kubectl get namespace calico-system &>/dev/null && echo "installed" || echo "not-installed"
+        # Check if calico-system namespace exists
+        if kubectl get namespace calico-system &>/dev/null; then
+          echo "installed"
+          exit 0
+        else
+          echo "not-installed"
+          exit 0
+        fi
       environment:
         KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
       register: calico_status
       changed_when: false
       ignore_errors: yes
+
+    - name: Debug - Show Calico detection result
+      debug:
+        msg: "Calico detection result: [{{ calico_status.stdout }}] (length: {{ calico_status.stdout | length }})"
 
     - name: Install Calico Operator
       block:
