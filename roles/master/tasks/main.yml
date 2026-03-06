@@ -58,15 +58,6 @@
           register: cleanup_result
           changed_when: false
 
-        - name: Verify cleanup worked - check for remaining files
-          shell: |
-            echo "Checking cleanup status..."
-            [ -d /etc/kubernetes/manifests ] && echo "⚠ WARNING: manifests dir still exists" || echo "✓ manifests cleaned"
-            [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ] && echo "⚠ WARNING: etcd data still exists" || echo "✓ etcd cleaned"
-            echo "✓ File cleanup verification complete"
-          changed_when: false
-          ignore_errors: yes
-
         - name: Restart container runtime (containerd)
           systemd:
             name: containerd
@@ -87,48 +78,7 @@
             delay: 10
           changed_when: false
 
-        - name: Display cleanup result
-          debug:
-            msg: "Cleaned up partial Kubernetes state from previous failed run"
-
-      # CONDITIONAL: Only cleanup if kubeadm NOT yet initialized
-      # If kubeadm init will run, we MUST have clean state
-      # Cleanup is idempotent - if nothing exists, it's a no-op
       when: not kubeadm_status.stat.exists
-
-    - name: Display state check result
-      debug:
-        msg: |
-          Kubernetes State Check Results:
-            State: {{ k8s_state_check.stdout }}
-            kubeadm Status: {{ "Initialized (admin.conf exists)" if kubeadm_status.stat.exists else "Not initialized" }}
-          
-          Decision:
-            {% if kubeadm_status.stat.exists %}
-            ✓ SKIP - kubeadm already initialized, nothing to do
-            {% elif k8s_state_check.stdout == "clean" %}
-            ✓ FRESH INSTALL - Clean VM, no cleanup needed, running kubeadm init
-            {% else %}
-            ✓ CLEANUP NEEDED - Detected: {{ k8s_state_check.stdout }}, cleaning before kubeadm init
-            {% endif %}
-
-    - name: Show diagnostic info if state detected (for troubleshooting)
-      shell: |
-        echo "=== Diagnostics ==="
-        echo "Manifest files:"
-        ls -la /etc/kubernetes/manifests/ 2>&1 || echo "  (none)"
-        
-        echo "etcd data:"
-        ls -la /var/lib/etcd/ 2>&1 | head -5 || echo "  (none)"
-        
-        echo "Running processes:"
-        ps aux | grep -E "kubelet|etcd|apiserver" | grep -v grep || echo "  (none)"
-        
-        echo "Listening ports:"
-        netstat -tlnp 2>/dev/null | grep -E "6443|10257|10259|2379" || echo "  (none)"
-      when: k8s_state_check.stdout != "clean"
-      changed_when: false
-      ignore_errors: yes
 
     - name: Initialize Kubernetes cluster on first master
       block:
@@ -139,49 +89,6 @@
             owner: root
             group: root
             mode: '0600'
-
-        - name: Final verification before kubeadm init - ensure clean state
-          shell: |
-            echo "=== Pre-kubeadm init verification ==="
-            
-            # Check 1: Manifests must NOT exist
-            if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
-              echo "FATAL: kube-apiserver.yaml still exists!"
-              exit 1
-            fi
-            echo "✓ No kube-apiserver.yaml"
-            
-            # Check 2: etcd data must be empty
-            if [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ]; then
-              echo "FATAL: /var/lib/etcd not empty!"
-              ls -la /var/lib/etcd/
-              exit 1
-            fi
-            echo "✓ /var/lib/etcd clean"
-            
-            # Check 3: Port 6443 must NOT be in use
-            if netstat -tlnp 2>/dev/null | grep -q ":6443"; then
-              echo "FATAL: Port 6443 still in use!"
-              netstat -tlnp | grep 6443
-              exit 1
-            fi
-            if lsof -i :6443 &>/dev/null 2>&1; then
-              echo "FATAL: Port 6443 still in use!"
-              lsof -i :6443
-              exit 1
-            fi
-            echo "✓ Port 6443 free"
-            
-            # Check 4: kubelet must NOT be running
-            if pgrep -x kubelet &>/dev/null; then
-              echo "FATAL: kubelet still running!"
-              ps aux | grep kubelet
-              exit 1
-            fi
-            echo "✓ kubelet not running"
-            
-            echo "✓ ALL checks passed - clean slate confirmed!"
-          changed_when: false
 
         - name: Run kubeadm init
           command: |
