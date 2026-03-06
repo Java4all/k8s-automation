@@ -8,6 +8,38 @@
 
     - name: Initialize Kubernetes cluster on first master
       block:
+        - name: Clean up any stuck kubeadm/kubelet processes
+          shell: |
+            set +e
+            systemctl stop kubelet || true
+            killall -9 kubelet kubeadm kube-apiserver kube-controller-manager kube-scheduler etcd 2>/dev/null || true
+            sleep 5
+            set -e
+          ignore_errors: yes
+          changed_when: false
+
+        - name: Clean up partial Kubernetes state
+          shell: |
+            rm -rf /etc/kubernetes/manifests
+            rm -rf /var/lib/etcd
+            rm -rf /var/lib/kubelet
+            mkdir -p /var/lib/kubelet
+          ignore_errors: yes
+          changed_when: false
+
+        - name: Restart kubelet
+          systemd:
+            name: kubelet
+            state: restarted
+            daemon_reload: yes
+          ignore_errors: yes
+
+        - name: Wait for kubelet to be ready
+          wait_for:
+            timeout: 30
+            delay: 5
+          changed_when: false
+
         - name: Create kubeadm config file
           template:
             src: kubeadm-config.yaml.j2
