@@ -27,13 +27,6 @@ networking:
   serviceSubnet: {{ cluster.networking.service_cidr | default('10.0.0.0/24') }}
   podSubnet: {{ cluster.networking.pod_cidr }}
   dnsDomain: cluster.local
-{% if (k8s_major == 1 and k8s_minor < 32) %}
-# Kubernetes < 1.32 - Full HA configuration with front-proxy
-apiServer:
-  extraArgs:
-    proxy-client-key-file: /etc/kubernetes/pki/front-proxy-client.key
-    proxy-client-cert-file: /etc/kubernetes/pki/front-proxy-client.crt
-{% endif %}
 # HA configuration - Allow external LB to access control plane components
 controllerManager:
   extraArgs:
