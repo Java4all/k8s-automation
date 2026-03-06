@@ -58,9 +58,11 @@
           delay: 10
 
         - name: Update custom resources with pod CIDR
-          shell: |
-            sed -i 's/cidr: 192\.168\.0\.0\/16/cidr: {{ cluster.calico.pool_cidr }}/g' /tmp/custom-resources.yaml
-          changed_when: false
+          ansible.builtin.replace:
+            path: /tmp/custom-resources.yaml
+            regexp: 'cidr:\s*192\.168\.0\.0/16'
+            replace: 'cidr: {{ cluster.calico.pool_cidr }}'
+            backup: yes
 
         - name: Apply custom resources
           command: |

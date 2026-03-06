@@ -137,20 +137,20 @@
               {% endif %}
 
         - name: Create GRUB_CMDLINE_LINUX if it doesn't exist
-          lineinfile:
+          ansible.builtin.replace:
             path: /etc/default/grub
             regexp: '^GRUB_CMDLINE_LINUX='
-            line: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
-            create: no
+            replace: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
+            backup: yes
           when: grub_var_exists.rc != 0 and not ansible_check_mode
           ignore_errors: yes
 
         - name: Update GRUB_CMDLINE_LINUX with AppArmor disabled
-          lineinfile:
+          ansible.builtin.replace:
             path: /etc/default/grub
             regexp: '^GRUB_CMDLINE_LINUX="([^"]*)"'
-            line: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
-            backrefs: no
+            replace: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
+            backup: yes
           when: grub_var_exists.rc == 0 and apparmor_check.rc != 0 and not ansible_check_mode
           ignore_errors: yes
 

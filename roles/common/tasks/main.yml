@@ -127,11 +127,11 @@
         mode: '0644'
     
     - name: Disable ipv4 forwarding in default sysctl
-      lineinfile:
+      ansible.builtin.replace:
         path: /etc/sysctl.d/99-sysctl.conf
         regexp: '^net\.ipv4\.ip_forward\s*='
-        line: '#net.ipv4.ip_forward = 0'
-        state: present
+        replace: '#net.ipv4.ip_forward = 0'
+        backup: yes
     
     - name: Apply sysctl settings
       command: sysctl --system
