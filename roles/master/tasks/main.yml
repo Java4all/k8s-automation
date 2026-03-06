@@ -6,7 +6,42 @@
         path: /etc/kubernetes/manifests/kube-apiserver.yaml
       register: kubeadm_status
 
-    - name: Initialize Kubernetes cluster on first master
+    - name: Check if Kubernetes state exists (comprehensive fresh/partial/installed check)
+      shell: |
+        set +e
+        
+        # Check for manifests (indicates partial/installed state)
+        if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+          echo "has_manifests"
+          exit 0
+        fi
+        
+        # Check for etcd data (indicates partial/installed state)
+        if [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ]; then
+          echo "has_etcd_data"
+          exit 0
+        fi
+        
+        # Check for running processes
+        if pgrep -x kubelet &>/dev/null || pgrep -x etcd &>/dev/null; then
+          echo "has_processes"
+          exit 0
+        fi
+        
+        # Check for bound ports
+        if netstat -tlnp 2>/dev/null | grep -q ":6443" || lsof -i :6443 &>/dev/null 2>&1; then
+          echo "has_port_6443"
+          exit 0
+        fi
+        
+        # If none of above, it's clean
+        echo "clean"
+        exit 0
+      register: k8s_state_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Smart cleanup (only if partial state found)
       block:
         - name: Stop kubelet service
           systemd:
@@ -66,12 +101,57 @@
             daemon_reload: yes
           ignore_errors: yes
 
-        - name: Wait for container runtime and kubelet to be ready
+        - name: Wait for container runtime and kubelet to be ready after cleanup
           wait_for:
             timeout: 60
             delay: 10
           changed_when: false
 
+        - name: Display cleanup result
+          debug:
+            msg: "Cleaned up partial Kubernetes state from previous failed run"
+
+      # CONDITIONAL: Only cleanup if ANY Kubernetes state detected AND kubeadm not fully initialized
+      when: 
+        - k8s_state_check.stdout != "clean"
+        - not kubeadm_status.stat.exists
+
+    - name: Display state check result
+      debug:
+        msg: |
+          Kubernetes State Check Results:
+            State: {{ k8s_state_check.stdout }}
+            kubeadm Status: {{ "Initialized (admin.conf exists)" if kubeadm_status.stat.exists else "Not initialized" }}
+          
+          Decision:
+            {% if kubeadm_status.stat.exists %}
+            ✓ SKIP - kubeadm already initialized, nothing to do
+            {% elif k8s_state_check.stdout == "clean" %}
+            ✓ FRESH INSTALL - Clean VM, no cleanup needed, running kubeadm init
+            {% else %}
+            ✓ CLEANUP NEEDED - Detected: {{ k8s_state_check.stdout }}, cleaning before kubeadm init
+            {% endif %}
+
+    - name: Show diagnostic info if state detected (for troubleshooting)
+      shell: |
+        echo "=== Diagnostics ==="
+        echo "Manifest files:"
+        ls -la /etc/kubernetes/manifests/ 2>&1 || echo "  (none)"
+        
+        echo "etcd data:"
+        ls -la /var/lib/etcd/ 2>&1 | head -5 || echo "  (none)"
+        
+        echo "Running processes:"
+        ps aux | grep -E "kubelet|etcd|apiserver" | grep -v grep || echo "  (none)"
+        
+        echo "Listening ports:"
+        netstat -tlnp 2>/dev/null | grep -E "6443|10257|10259|2379" || echo "  (none)"
+      when: k8s_state_check.stdout != "clean"
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Initialize Kubernetes cluster on first master
+      block:
         - name: Create kubeadm config file
           template:
             src: kubeadm-config.yaml.j2
