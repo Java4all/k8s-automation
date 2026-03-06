@@ -58,10 +58,9 @@
           delay: 10
 
         - name: Update custom resources with pod CIDR
-          lineinfile:
-            path: /tmp/custom-resources.yaml
-            regexp: '(\s+)cidr:\s+192\.168\.0\.0/16'
-            line: '\1cidr: {{ cluster.calico.pool_cidr }}'
+          shell: |
+            sed -i 's/cidr: 192\.168\.0\.0\/16/cidr: {{ cluster.calico.pool_cidr }}/g' /tmp/custom-resources.yaml
+          changed_when: false
 
         - name: Apply custom resources
           command: |
