@@ -74,18 +74,6 @@
     - role: master
       tags: [master, init]
 
-  post_tasks:
-    - name: Wait for master to be ready
-      shell: |
-        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-      environment:
-        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-      register: master_ready
-      until: master_ready.stdout == "True"
-      retries: 30
-      delay: 10
-      ignore_errors: yes
-
 - name: Deploy Calico CNI
   hosts: "{{ groups['masters'][0] }}"
   become: yes
@@ -96,6 +84,18 @@
   roles:
     - role: calico
       tags: [calico, cni]
+  
+  post_tasks:
+    - name: Wait for master to be ready after CNI deployment
+      shell: |
+        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+      register: master_ready
+      until: master_ready.stdout == "True"
+      retries: 30
+      delay: 10
+      ignore_errors: yes
 
 - name: Deploy additional master nodes
   hosts: "{{ groups['masters'][1:] }}"
