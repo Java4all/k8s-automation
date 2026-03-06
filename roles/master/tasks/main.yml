@@ -7,36 +7,20 @@
       register: kubeadm_status
 
     - name: Check if Kubernetes state exists (comprehensive fresh/partial/installed check)
-      shell: |
+      shell: |-
         set +e
-        
-        # Check for manifests (indicates partial/installed state)
-        if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
-          echo "has_manifests"
-          exit 0
-        fi
-        
-        # Check for etcd data (indicates partial/installed state)
-        if [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ]; then
-          echo "has_etcd_data"
-          exit 0
-        fi
-        
+        # Check for manifests
+        [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && echo "has_manifests" && exit 0
+        # Check for etcd data
+        [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ] && echo "has_etcd_data" && exit 0
         # Check for running processes
-        if pgrep -x kubelet &>/dev/null || pgrep -x etcd &>/dev/null; then
-          echo "has_processes"
-          exit 0
-        fi
-        
+        pgrep -x kubelet &>/dev/null && echo "has_processes" && exit 0
+        pgrep -x etcd &>/dev/null && echo "has_processes" && exit 0
         # Check for bound ports
-        if netstat -tlnp 2>/dev/null | grep -q ":6443" || lsof -i :6443 &>/dev/null 2>&1; then
-          echo "has_port_6443"
-          exit 0
-        fi
-        
-        # If none of above, it's clean
+        netstat -tlnp 2>/dev/null | grep -q ":6443" && echo "has_port_6443" && exit 0
+        lsof -i :6443 &>/dev/null 2>&1 && echo "has_port_6443" && exit 0
+        # If none, it's clean
         echo "clean"
-        exit 0
       register: k8s_state_check
       changed_when: false
       ignore_errors: yes
