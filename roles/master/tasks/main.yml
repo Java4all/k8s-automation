@@ -34,34 +34,38 @@
 
         - name: Kill any remaining Kubernetes processes
           shell: |
-            set +e
             killall -9 kubelet kubeadm kube-apiserver kube-controller-manager kube-scheduler etcd 2>/dev/null || true
             sleep 2
-            set -e
-          ignore_errors: yes
           changed_when: false
 
         - name: Remove Kubernetes containers
           shell: |
-            set +e
             ctr -n k8s.io container rm $(ctr -n k8s.io container list -q) 2>/dev/null || true
             crictl rm $(crictl ps -aq) 2>/dev/null || true
             docker rm -f $(docker ps -aq) 2>/dev/null || true
             sleep 2
-            set -e
-          ignore_errors: yes
           changed_when: false
 
         - name: Clean all Kubernetes state completely
           shell: |
-            rm -rf /etc/kubernetes/*
-            rm -rf /var/lib/etcd/*
-            rm -rf /var/lib/kubelet/*
-            rm -rf /var/lib/cni/*
-            rm -rf /var/run/kubernetes/*
+            rm -rf /etc/kubernetes/* 2>&1
+            rm -rf /var/lib/etcd/* 2>&1
+            rm -rf /var/lib/kubelet/* 2>&1
+            rm -rf /var/lib/cni/* 2>&1
+            rm -rf /var/run/kubernetes/* 2>&1
             mkdir -p /var/lib/kubelet
             mkdir -p /var/lib/etcd
-          ignore_errors: yes
+          register: cleanup_result
+          changed_when: false
+
+        - name: Verify cleanup worked - check for remaining files
+          shell: |
+            echo "Checking for remaining Kubernetes files..."
+            [ -d /etc/kubernetes/manifests ] && echo "ERROR: manifests dir still exists!" && exit 1 || echo "✓ manifests cleaned"
+            [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ] && echo "ERROR: etcd data still exists!" && exit 1 || echo "✓ etcd cleaned"
+            pgrep kubelet &>/dev/null && echo "ERROR: kubelet still running!" && exit 1 || echo "✓ kubelet stopped"
+            pgrep etcd &>/dev/null && echo "ERROR: etcd still running!" && exit 1 || echo "✓ etcd stopped"
+            echo "✓ Cleanup verification passed"
           changed_when: false
 
         - name: Restart container runtime (containerd)
@@ -69,14 +73,14 @@
             name: containerd
             state: restarted
             daemon_reload: yes
-          ignore_errors: yes
+          changed_when: false
 
         - name: Restart kubelet service
           systemd:
             name: kubelet
             state: restarted
             daemon_reload: yes
-          ignore_errors: yes
+          changed_when: false
 
         - name: Wait for container runtime and kubelet to be ready after cleanup
           wait_for:
@@ -88,10 +92,10 @@
           debug:
             msg: "Cleaned up partial Kubernetes state from previous failed run"
 
-      # CONDITIONAL: Only cleanup if ANY Kubernetes state detected AND kubeadm not fully initialized
-      when: 
-        - k8s_state_check.stdout != "clean"
-        - not kubeadm_status.stat.exists
+      # CONDITIONAL: Only cleanup if kubeadm NOT yet initialized
+      # If kubeadm init will run, we MUST have clean state
+      # Cleanup is idempotent - if nothing exists, it's a no-op
+      when: not kubeadm_status.stat.exists
 
     - name: Display state check result
       debug:
@@ -137,12 +141,53 @@
             group: root
             mode: '0600'
 
+        - name: Final verification before kubeadm init - ensure clean state
+          shell: |
+            echo "=== Pre-kubeadm init verification ==="
+            
+            # Check 1: Manifests must NOT exist
+            if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+              echo "FATAL: kube-apiserver.yaml still exists!"
+              exit 1
+            fi
+            echo "✓ No kube-apiserver.yaml"
+            
+            # Check 2: etcd data must be empty
+            if [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ]; then
+              echo "FATAL: /var/lib/etcd not empty!"
+              ls -la /var/lib/etcd/
+              exit 1
+            fi
+            echo "✓ /var/lib/etcd clean"
+            
+            # Check 3: Port 6443 must NOT be in use
+            if netstat -tlnp 2>/dev/null | grep -q ":6443"; then
+              echo "FATAL: Port 6443 still in use!"
+              netstat -tlnp | grep 6443
+              exit 1
+            fi
+            if lsof -i :6443 &>/dev/null 2>&1; then
+              echo "FATAL: Port 6443 still in use!"
+              lsof -i :6443
+              exit 1
+            fi
+            echo "✓ Port 6443 free"
+            
+            # Check 4: kubelet must NOT be running
+            if pgrep -x kubelet &>/dev/null; then
+              echo "FATAL: kubelet still running!"
+              ps aux | grep kubelet
+              exit 1
+            fi
+            echo "✓ kubelet not running"
+            
+            echo "✓ ALL checks passed - clean slate confirmed!"
+          changed_when: false
+
         - name: Run kubeadm init
           command: |
             kubeadm init --config=/tmp/kubeadm-config.yaml --upload-certs
           register: kubeadm_init
-          retries: 3
-          delay: 10
 
         - name: Display kubeadm init output
           debug:
