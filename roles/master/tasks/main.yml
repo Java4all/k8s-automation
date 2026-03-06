@@ -6,24 +6,17 @@
         path: /etc/kubernetes/manifests/kube-apiserver.yaml
       register: kubeadm_status
 
-    - name: Check if Kubernetes state exists (comprehensive fresh/partial/installed check)
-      shell: |-
-        set +e
-        # Check for manifests
-        [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ] && echo "has_manifests" && exit 0
-        # Check for etcd data
-        [ -d /var/lib/etcd ] && [ -n "$(ls -A /var/lib/etcd 2>/dev/null)" ] && echo "has_etcd_data" && exit 0
-        # Check for running processes
-        pgrep -x kubelet &>/dev/null && echo "has_processes" && exit 0
-        pgrep -x etcd &>/dev/null && echo "has_processes" && exit 0
-        # Check for bound ports
-        netstat -tlnp 2>/dev/null | grep -q ":6443" && echo "has_port_6443" && exit 0
-        lsof -i :6443 &>/dev/null 2>&1 && echo "has_port_6443" && exit 0
-        # If none, it's clean
-        echo "clean"
-      register: k8s_state_check
+    - name: Check if Kubernetes state exists (check for manifest file)
+      stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: k8s_manifest_check
       changed_when: false
-      ignore_errors: yes
+
+    - name: Set kubernetes state (manifests exist = has state, missing = clean)
+      set_fact:
+        k8s_state_check:
+          stdout: "{% if k8s_manifest_check.stat.exists %}has_manifests{% else %}clean{% endif %}"
+      changed_when: false
 
     - name: Smart cleanup (only if partial state found)
       block:
