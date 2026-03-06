@@ -62,7 +62,7 @@
           changed_when: false
 
         - name: Check kubectl version
-          command: kubectl version --client --short
+          command: kubectl version --client
           register: kubectl_version
           changed_when: false
           ignore_errors: yes
@@ -72,7 +72,7 @@
             msg: |
               Kubelet: {{ kubelet_version.stdout }}
               Kubeadm: {{ kubeadm_version.stdout }}
-              Kubectl: {{ kubectl_version.stdout | default('Not available yet') }}
+              Kubectl: {{ kubectl_version.stdout_lines[0] if kubectl_version.stdout_lines else 'Not available yet' }}
 
     - name: Verify Kubernetes cluster status
       block:
@@ -105,7 +105,14 @@
 
         - name: Check if all nodes are ready
           shell: |
-            kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -v True
+            # Check if any nodes have False status
+            if kubectl get nodes -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | grep -q False; then
+              echo "ERROR: Some nodes are not ready"
+              exit 1
+            else
+              echo "OK: All nodes are ready"
+              exit 0
+            fi
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: not_ready_nodes
