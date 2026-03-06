@@ -3,7 +3,7 @@
   block:
     - name: Check if kubeadm has already run
       stat:
-        path: /etc/kubernetes/admin.conf
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
       register: kubeadm_status
 
     - name: Initialize Kubernetes cluster on first master
