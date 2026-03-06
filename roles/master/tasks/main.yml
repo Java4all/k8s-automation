@@ -96,6 +96,104 @@
             kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -vw "phase" | tail -1
           register: cert_key
           changed_when: false
+
+        - name: Verify kubeadm completed all phases
+          shell: |
+            set -e
+            echo "Checking kubeadm completion..."
+            
+            # Check if all critical files were created
+            [ -f /etc/kubernetes/admin.conf ] || { echo "✗ admin.conf missing"; exit 1; }
+            [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ] || { echo "✗ kube-apiserver.yaml missing"; exit 1; }
+            [ -f /etc/kubernetes/manifests/kube-controller-manager.yaml ] || { echo "✗ kube-controller-manager.yaml missing"; exit 1; }
+            [ -f /etc/kubernetes/manifests/kube-scheduler.yaml ] || { echo "✗ kube-scheduler.yaml missing"; exit 1; }
+            [ -f /etc/kubernetes/manifests/etcd.yaml ] || { echo "✗ etcd.yaml missing"; exit 1; }
+            
+            echo "✓ All kubeadm phase files created successfully"
+            exit 0
+          changed_when: false
+
+        - name: Wait for API server to respond to requests
+          shell: |
+            for i in {1..120}; do
+              if curl -s -k https://localhost:6443/livez 2>/dev/null | grep -q ok; then
+                echo "✓ API server healthy"
+                exit 0
+              fi
+              echo "Waiting for API server... ($i/120)"
+              sleep 5
+            done
+            echo "✗ API server failed to become healthy"
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+        - name: Wait for RBAC controller to be ready
+          shell: |
+            export KUBECONFIG="/etc/kubernetes/admin.conf"
+            for i in {1..120}; do
+              # Check if RBAC authorization is working
+              if kubectl auth can-i list clusterrolebindings --as=system:serviceaccount:kube-system:default &>/dev/null; then
+                echo "✓ RBAC controller ready"
+                exit 0
+              fi
+              echo "Waiting for RBAC controller... ($i/120)"
+              sleep 5
+            done
+            echo "✗ RBAC controller failed to initialize"
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+        - name: Ensure cluster-admin ClusterRoleBinding exists
+          shell: |
+            export KUBECONFIG="/etc/kubernetes/admin.conf"
+            
+            # Check if binding already exists
+            if kubectl get clusterrolebinding cluster-admin &>/dev/null; then
+              echo "✓ cluster-admin ClusterRoleBinding already exists"
+              exit 0
+            fi
+            
+            echo "Creating cluster-admin ClusterRoleBinding..."
+            kubectl create clusterrolebinding cluster-admin \
+              --clusterrole=cluster-admin \
+              --user=kubernetes-admin 2>/dev/null || true
+            
+            sleep 5
+            
+            # Verify it was created
+            if kubectl get clusterrolebinding cluster-admin &>/dev/null; then
+              echo "✓ cluster-admin ClusterRoleBinding created successfully"
+              exit 0
+            else
+              echo "✗ Failed to create cluster-admin ClusterRoleBinding"
+              exit 1
+            fi
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+        - name: Verify kubectl works with kubernetes-admin user
+          shell: |
+            export KUBECONFIG="/etc/kubernetes/admin.conf"
+            for i in {1..60}; do
+              if kubectl get namespaces &>/dev/null; then
+                echo "✓ kubectl working, namespaces accessible"
+                kubectl get namespaces
+                exit 0
+              fi
+              echo "Waiting for kubectl... ($i/60)"
+              sleep 5
+            done
+            echo "✗ kubectl still not working after RBAC setup"
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
       when: not kubeadm_status.stat.exists
 
     - name: Configure kubectl access
@@ -124,23 +222,117 @@
 
     - name: Wait for API server
       block:
-        - name: Wait for Kubernetes API to be ready
-          command: kubectl get nodes
-          environment:
-            KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-          register: api_ready
-          until: api_ready.rc == 0
-          retries: 30
-          delay: 10
+        - name: Wait for API server port to be open
+          wait_for:
+            host: localhost
+            port: 6443
+            state: started
+            timeout: 300
+            delay: 5
           changed_when: false
 
-    - name: Check cluster status
-      command: |
-        kubectl get nodes -o wide
-      environment:
-        KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-      register: cluster_status
-      changed_when: false
+        - name: Wait for API server to be healthy (livez check)
+          shell: |
+            for i in {1..60}; do
+              curl -s -k https://localhost:6443/livez 2>/dev/null | grep -q ok && exit 0
+              sleep 5
+            done
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+        - name: Wait for RBAC to be fully initialized (kubectl must work)
+          shell: |
+            export KUBECONFIG="{{ ansible_env.HOME }}/.kube/config"
+            for i in {1..120}; do
+              if kubectl get nodes &>/dev/null; then
+                echo "✓ RBAC initialized, kubectl working"
+                exit 0
+              fi
+              echo "Waiting for RBAC... ($i/120)"
+              sleep 5
+            done
+            echo "✗ RBAC initialization timeout"
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+    - name: Verify cluster is ready for deployment
+      block:
+        - name: Check if admin ClusterRoleBinding exists
+          shell: |
+            export KUBECONFIG="{{ ansible_env.HOME }}/.kube/config"
+            kubectl get clusterrolebinding cluster-admin &>/dev/null && echo "exists" || echo "missing"
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          register: admin_binding_check
+          changed_when: false
+
+        - name: Debug - Show admin binding status
+          debug:
+            msg: "Admin ClusterRoleBinding: {{ admin_binding_check.stdout }}"
+
+        - name: Ensure admin ClusterRoleBinding exists (fix for missing RBAC)
+          shell: |
+            export KUBECONFIG="{{ ansible_env.HOME }}/.kube/config"
+            
+            # Check if binding exists
+            if kubectl get clusterrolebinding cluster-admin &>/dev/null; then
+              echo "✓ Admin ClusterRoleBinding already exists"
+              exit 0
+            fi
+            
+            # Create it if missing (kubeadm should have done this, but just in case)
+            echo "Creating missing admin ClusterRoleBinding..."
+            kubectl create clusterrolebinding cluster-admin --clusterrole=cluster-admin --user=kubernetes-admin || true
+            sleep 5
+            
+            # Verify
+            if kubectl get clusterrolebinding cluster-admin &>/dev/null; then
+              echo "✓ Admin ClusterRoleBinding created successfully"
+              exit 0
+            else
+              echo "✗ Failed to create admin ClusterRoleBinding"
+              exit 1
+            fi
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+          ignore_errors: yes
+
+        - name: Wait for kubectl to work (RBAC must respond)
+          shell: |
+            export KUBECONFIG="{{ ansible_env.HOME }}/.kube/config"
+            for i in {1..30}; do
+              if kubectl get nodes &>/dev/null; then
+                echo "✓ RBAC working, kubectl functional"
+                exit 0
+              fi
+              echo "Waiting for kubectl... ($i/30)"
+              sleep 5
+            done
+            echo "✗ kubectl still not working after ensuring ClusterRoleBinding"
+            exit 1
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+
+        - name: Display node status
+          shell: |
+            export KUBECONFIG="{{ ansible_env.HOME }}/.kube/config"
+            echo "Master Node Status:"
+            kubectl get nodes -o wide
+          environment:
+            PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          changed_when: false
+          register: nodes_status
+
+        - name: Show cluster status
+          debug:
+            msg: |
+              {{ nodes_status.stdout }}
 
     - name: Display cluster status
       debug:
