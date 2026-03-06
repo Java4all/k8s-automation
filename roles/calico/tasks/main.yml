@@ -2,16 +2,18 @@
 - name: Install Calico Network Plugin
   block:
     - name: Check if Calico is already installed
-      shell: |
-        # Try to get calico-system namespace
-        # If it exists, grep will find it and return "installed"
-        # If it doesn't exist, grep will find nothing and return "not-installed"
-        kubectl get ns -o name 2>/dev/null | grep -q "namespace/calico-system" && echo "installed" || echo "not-installed"
+      command: kubectl get namespace calico-system
       environment:
         KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-      register: calico_status
-      changed_when: false
+      register: calico_ns_check
       ignore_errors: yes
+      changed_when: false
+
+    - name: Set calico installation status based on namespace check
+      set_fact:
+        calico_status:
+          stdout: "{% if calico_ns_check.rc == 0 %}installed{% else %}not-installed{% endif %}"
+      changed_when: false
 
     - name: Debug - Show Calico detection result
       debug:
