@@ -28,12 +28,25 @@ networking:
   podSubnet: {{ cluster.networking.pod_cidr }}
   dnsDomain: cluster.local
 # HA configuration - Allow external LB to access control plane components
+{% if (k8s_major == 1 and k8s_minor >= 32) or k8s_major >= 2 %}
+# Kubernetes 1.32+ (v1beta4) - List format for extraArgs
+controllerManager:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+scheduler:
+  extraArgs:
+    - name: bind-address
+      value: 0.0.0.0
+{% else %}
+# Kubernetes < 1.32 (v1beta3 or earlier) - Map format for extraArgs
 controllerManager:
   extraArgs:
     bind-address: 0.0.0.0
 scheduler:
   extraArgs:
     bind-address: 0.0.0.0
+{% endif %}
 etcd:
   local:
     dataDir: /var/lib/etcd
