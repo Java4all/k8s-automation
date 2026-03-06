@@ -90,6 +90,22 @@
             group: root
             mode: '0600'
 
+        - name: Wait for system to be ready before kubeadm init
+          shell: |
+            echo "Waiting for system readiness (120 seconds max)..."
+            for i in {1..120}; do
+              # Check if kubelet is running and healthy
+              if systemctl is-active --quiet kubelet && curl -s http://127.0.0.1:10248/healthz &>/dev/null; then
+                echo "✓ System ready - kubelet is healthy"
+                exit 0
+              fi
+              echo "Waiting... ($i/120)"
+              sleep 1
+            done
+            echo "⚠ Timeout waiting for kubelet, but proceeding anyway"
+          changed_when: false
+          ignore_errors: yes
+
         - name: Run kubeadm init
           command: |
             kubeadm init --config=/tmp/kubeadm-config.yaml --upload-certs
