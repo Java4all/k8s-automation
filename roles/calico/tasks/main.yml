@@ -3,14 +3,10 @@
   block:
     - name: Check if Calico is already installed
       shell: |
-        # Check if calico-system namespace exists
-        if kubectl get namespace calico-system &>/dev/null; then
-          echo "installed"
-          exit 0
-        else
-          echo "not-installed"
-          exit 0
-        fi
+        # Try to get calico-system namespace
+        # If it exists, grep will find it and return "installed"
+        # If it doesn't exist, grep will find nothing and return "not-installed"
+        kubectl get ns -o name 2>/dev/null | grep -q "namespace/calico-system" && echo "installed" || echo "not-installed"
       environment:
         KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
       register: calico_status
