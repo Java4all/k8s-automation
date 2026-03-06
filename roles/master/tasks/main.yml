@@ -8,36 +8,68 @@
 
     - name: Initialize Kubernetes cluster on first master
       block:
-        - name: Clean up any stuck kubeadm/kubelet processes
+        - name: Stop kubelet service
+          systemd:
+            name: kubelet
+            state: stopped
+          ignore_errors: yes
+
+        - name: Stop container runtime (containerd)
+          systemd:
+            name: containerd
+            state: stopped
+          ignore_errors: yes
+
+        - name: Kill any remaining Kubernetes processes
           shell: |
             set +e
-            systemctl stop kubelet || true
             killall -9 kubelet kubeadm kube-apiserver kube-controller-manager kube-scheduler etcd 2>/dev/null || true
-            sleep 5
+            sleep 2
             set -e
           ignore_errors: yes
           changed_when: false
 
-        - name: Clean up partial Kubernetes state
+        - name: Remove Kubernetes containers
           shell: |
-            rm -rf /etc/kubernetes/manifests
-            rm -rf /var/lib/etcd
-            rm -rf /var/lib/kubelet
-            mkdir -p /var/lib/kubelet
+            set +e
+            ctr -n k8s.io container rm $(ctr -n k8s.io container list -q) 2>/dev/null || true
+            crictl rm $(crictl ps -aq) 2>/dev/null || true
+            docker rm -f $(docker ps -aq) 2>/dev/null || true
+            sleep 2
+            set -e
           ignore_errors: yes
           changed_when: false
 
-        - name: Restart kubelet
+        - name: Clean all Kubernetes state completely
+          shell: |
+            rm -rf /etc/kubernetes/*
+            rm -rf /var/lib/etcd/*
+            rm -rf /var/lib/kubelet/*
+            rm -rf /var/lib/cni/*
+            rm -rf /var/run/kubernetes/*
+            mkdir -p /var/lib/kubelet
+            mkdir -p /var/lib/etcd
+          ignore_errors: yes
+          changed_when: false
+
+        - name: Restart container runtime (containerd)
+          systemd:
+            name: containerd
+            state: restarted
+            daemon_reload: yes
+          ignore_errors: yes
+
+        - name: Restart kubelet service
           systemd:
             name: kubelet
             state: restarted
             daemon_reload: yes
           ignore_errors: yes
 
-        - name: Wait for kubelet to be ready
+        - name: Wait for container runtime and kubelet to be ready
           wait_for:
-            timeout: 30
-            delay: 5
+            timeout: 60
+            delay: 10
           changed_when: false
 
         - name: Create kubeadm config file
