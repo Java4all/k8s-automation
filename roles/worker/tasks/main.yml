@@ -70,6 +70,21 @@
           ignore_errors: true
           delegate_to: "{{ groups['masters'][0] }}"
 
+        - name: Label worker node with worker role
+          shell: |
+            kubectl label node {{ inventory_hostname }} node-role.kubernetes.io/worker=worker --overwrite
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: label_result
+          changed_when: false
+          ignore_errors: true
+          delegate_to: "{{ groups['masters'][0] }}"
+
+        - name: Display node labeling result
+          debug:
+            msg: "{{ label_result.stdout }}"
+          ignore_errors: true
+
     - name: Display worker node status
       debug:
         msg: "Worker node {{ inventory_hostname }} has been joined to the cluster"
