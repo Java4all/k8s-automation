@@ -67,7 +67,7 @@
           retries: 30
           delay: 10
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
           delegate_to: "{{ groups['masters'][0] }}"
 
     - name: Display worker node status

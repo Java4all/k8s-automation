@@ -77,7 +77,7 @@
         name: nftables
         enabled: no
         state: stopped
-      ignore_errors: yes
+      ignore_errors: true
 
 - name: Disable swap
   block:

@@ -24,13 +24,13 @@
           systemd:
             name: kubelet
             state: stopped
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Stop container runtime (containerd)
           systemd:
             name: containerd
             state: stopped
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Kill any remaining Kubernetes processes
           shell: |
@@ -104,7 +104,7 @@
             done
             echo "⚠ Timeout waiting for kubelet, but proceeding anyway"
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Run kubeadm init
           command: |
@@ -324,7 +324,7 @@
           environment:
             PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Wait for kubectl to work (RBAC must respond)
           shell: |
@@ -379,4 +379,4 @@
         KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
       when: node_name.stdout | length > 0
       changed_when: false
-      ignore_errors: yes
+      ignore_errors: true

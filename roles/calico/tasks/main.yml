@@ -6,7 +6,7 @@
       environment:
         KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
       register: calico_ns_check
-      ignore_errors: yes
+      ignore_errors: true
       changed_when: false
 
     - name: Set calico installation status based on namespace check
@@ -46,7 +46,7 @@
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
           retries: 3
           delay: 10
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Download custom resources
           shell: |
@@ -82,15 +82,16 @@
             kubectl -n calico-system wait --for=condition=ready pod -l k8s-app=calico-node --timeout={{ deployment.calico_wait_timeout | default(300) }}s
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-          retries: 3
-          delay: 10
+          retries: 10
+          delay: 30
+          ignore_errors: true
 
         - name: Wait for other calico pods
           shell: |
             kubectl -n calico-system wait --for=condition=ready pod --all --timeout={{ deployment.calico_wait_timeout | default(300) }}s
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Check Calico pod status
           command: |

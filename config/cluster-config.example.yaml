@@ -75,18 +75,21 @@ nodes:
       ip: "10.0.32.10"
       netmask: "255.255.240.0"      # /20
       role: "master"
+      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
       
     - name: "vmm2"
       hostname: "vmm2"
       ip: "10.0.32.11"
       netmask: "255.255.240.0"      # /20
       role: "master"
+      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
       
     - name: "vmm3"
       hostname: "vmm3"
       ip: "10.0.32.12"
       netmask: "255.255.240.0"      # /20
       role: "master"
+      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
 
   # Worker Nodes
   workers:
@@ -95,18 +98,21 @@ nodes:
       ip: "10.0.32.2"
       netmask: "255.255.240.0"      # /20
       role: "worker"
+      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
       
     - name: "vmw2"
       hostname: "vmw2"
       ip: "10.0.32.3"
       netmask: "255.255.240.0"      # /20
       role: "worker"
+      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
       
     - name: "vmw3"
       hostname: "vmw3"
       ip: "10.0.32.4"
       netmask: "255.255.240.0"      # /20
       role: "worker"
+      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
 
 # System Configuration
 system:

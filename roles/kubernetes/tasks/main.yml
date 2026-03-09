@@ -109,7 +109,7 @@
           shell: grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub
           register: grub_var_exists
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Read current GRUB cmdline
           shell: grep "^GRUB_CMDLINE_LINUX=" /etc/default/grub | cut -d'"' -f2
@@ -121,7 +121,7 @@
           shell: grep -q "apparmor=0" /etc/default/grub
           register: apparmor_check
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
           when: grub_var_exists.rc == 0
 
         - name: Display GRUB status
@@ -143,7 +143,7 @@
             replace: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
             backup: yes
           when: grub_var_exists.rc != 0 and not ansible_check_mode
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Update GRUB_CMDLINE_LINUX with AppArmor disabled
           ansible.builtin.replace:
@@ -152,14 +152,14 @@
             replace: 'GRUB_CMDLINE_LINUX="apparmor=0 security=apparmor audit=1 audit_backlog_limit=8192"'
             backup: yes
           when: grub_var_exists.rc == 0 and apparmor_check.rc != 0 and not ansible_check_mode
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Update GRUB configuration
           command: update-grub
           register: grub_update
           changed_when: "'Nothing to do' not in grub_update.stdout"
           when: grub_var_exists.rc == 0 and not ansible_check_mode
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Display GRUB update result
           debug:
@@ -198,7 +198,7 @@
           shell: grep -q "kubectl completion bash" ~/.bashrc
           register: kubectl_completion
           changed_when: false
-          ignore_errors: yes
+          ignore_errors: true
 
         - name: Add kubectl completion to bashrc
           shell: echo 'source <(kubectl completion bash)' >> ~/.bashrc

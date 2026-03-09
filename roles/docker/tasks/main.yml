@@ -20,7 +20,7 @@
         curl -I --connect-timeout 5 https://download.docker.com/linux/ubuntu/gpg 2>&1 | head -1
       register: network_test
       changed_when: false
-      ignore_errors: yes
+      ignore_errors: true
 
     - name: Display network test result
       debug:
@@ -95,7 +95,7 @@
         apt-cache search docker-ce 2>&1 | head -5
       register: apt_search_result
       changed_when: false
-      ignore_errors: yes
+      ignore_errors: true
 
     - name: Display apt search result
       debug:
