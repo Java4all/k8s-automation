@@ -90,16 +90,18 @@
             group: root
             mode: '0600'
 
-        - name: Wait for system to be ready before kubeadm init
+        - name: Wait for system to be ready before kubeadm init (extended timeout for slow VMs)
           shell: |
-            echo "Waiting for system readiness (120 seconds max)..."
-            for i in {1..120}; do
+            echo "Waiting for system readiness (300 seconds max - for slow Azure VMs)..."
+            for i in {1..300}; do
               # Check if kubelet is running and healthy
               if systemctl is-active --quiet kubelet && curl -s http://127.0.0.1:10248/healthz &>/dev/null; then
                 echo "✓ System ready - kubelet is healthy"
                 exit 0
               fi
-              echo "Waiting... ($i/120)"
+              if [ $((i % 30)) -eq 0 ]; then
+                echo "Waiting... ($i/300 seconds)"
+              fi
               sleep 1
             done
             echo "⚠ Timeout waiting for kubelet, but proceeding anyway"

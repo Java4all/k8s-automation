@@ -77,7 +77,7 @@
     - name: Verify Kubernetes cluster status
       block:
         - name: Get cluster info
-          command: |
+          command: >
             kubectl cluster-info
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
@@ -86,7 +86,7 @@
           ignore_errors: true
 
         - name: Get nodes status
-          command: |
+          command: >
             kubectl get nodes -o wide
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
@@ -95,7 +95,7 @@
           ignore_errors: true
 
         - name: Get pod status
-          command: |
+          command: >
             kubectl get pods --all-namespaces
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf

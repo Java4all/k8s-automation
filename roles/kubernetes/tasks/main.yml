@@ -161,6 +161,13 @@
           when: grub_var_exists.rc == 0 and not ansible_check_mode
           ignore_errors: true
 
+        - name: Wait for system to settle after GRUB update (extended timeout for grub rebuild)
+          wait_for:
+            timeout: 120
+            delay: 10
+          changed_when: false
+          when: grub_var_exists.rc == 0 and not ansible_check_mode
+
         - name: Display GRUB update result
           debug:
             msg: |

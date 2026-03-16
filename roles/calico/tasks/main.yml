@@ -40,12 +40,14 @@
           delay: 10
 
         - name: Wait for Tigera Operator to be ready
-          shell: |
-            kubectl -n tigera-operator wait --for=condition=ready pod -l k8s-app=tigera-operator --timeout=300s
+          command: >
+            kubectl -n tigera-operator wait --for=condition=ready pod
+            -l k8s-app=tigera-operator --timeout=300s
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
           retries: 3
           delay: 10
+          changed_when: false
           ignore_errors: true
 
         - name: Download custom resources
@@ -78,23 +80,30 @@
     - name: Wait for Calico pods to be running
       block:
         - name: Wait for calico-node pods
-          shell: |
-            kubectl -n calico-system wait --for=condition=ready pod -l k8s-app=calico-node --timeout={{ deployment.calico_wait_timeout | default(300) }}s
+          command: >
+            kubectl -n calico-system wait
+            --for=condition=ready pod
+            -l k8s-app=calico-node
+            --all
+            --timeout={{ deployment.calico_wait_timeout | default(300) }}s
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
           retries: 10
           delay: 30
+          changed_when: false
           ignore_errors: true
 
         - name: Wait for other calico pods
-          shell: |
-            kubectl -n calico-system wait --for=condition=ready pod --all --timeout={{ deployment.calico_wait_timeout | default(300) }}s
+          command: >
+            kubectl -n calico-system wait --for=condition=ready pod --all
+            --timeout={{ deployment.calico_wait_timeout | default(300) }}s
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
+          changed_when: false
           ignore_errors: true
 
         - name: Check Calico pod status
-          command: |
+          command: >
             kubectl get pods -n calico-system
           environment:
             KUBECONFIG: "{{ ansible_env.HOME }}/.kube/config"
