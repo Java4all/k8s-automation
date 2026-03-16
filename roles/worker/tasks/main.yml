@@ -23,7 +23,7 @@
           become: yes
 
         - name: Join worker node to cluster
-          shell: "{{ join_command.stdout }}"
+          shell: "{{ join_command.stdout }} --v=5"
           register: join_result
           retries: 3
           delay: 10
@@ -35,51 +35,45 @@
       when: not kubelet_conf.stat.exists
 
     ###########################################################################
-    # 3. VERIFY NODE HAS JOINED (RUNS ON MASTER)
+    # 3. VERIFY NODE HAS JOINED AND LABEL WORKER NODE
     ###########################################################################
-    - name: Verify node has joined
+    - name: Verify node has joined and label worker node
+      delegate_to: "{{ groups['masters'][0] }}"
       block:
         - name: Wait for worker node to register with API server
-          shell: |
-            kubectl get node {{ inventory_hostname }} --no-headers
+          shell: kubectl get node {{ inventory_hostname }} --no-headers
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: node_registered
           until: node_registered.rc == 0
           retries: 30
           delay: 10
-          delegate_to: "{{ groups['masters'][0] }}"
 
         - name: Wait for node to become Ready
           shell: |
-            kubectl get node {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+            kubectl get node {{ inventory_hostname }} \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: node_ready
-          until: node_ready.stdout == "True"
+          until: "'True' in node_ready.stdout"
           retries: 30
           delay: 10
-          delegate_to: "{{ groups['masters'][0] }}"
 
-    ###########################################################################
-    # 4. LABEL WORKER NODE (AFTER READY)
-    ###########################################################################
-    - name: Label worker node
-      block:
         - name: Label worker node with worker role
           shell: |
-            kubectl label node {{ inventory_hostname }} node-role.kubernetes.io/worker=worker --overwrite
+            kubectl label node {{ inventory_hostname }} \
+              node-role.kubernetes.io/worker=worker --overwrite
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: label_result
-          delegate_to: "{{ groups['masters'][0] }}"
 
         - name: Display node labeling result
           debug:
             msg: "Worker {{ inventory_hostname }} labeling: {{ label_result.stdout | default('No output') }}"
 
     ###########################################################################
-    # 5. FINAL STATUS
+    # 4. FINAL STATUS
     ###########################################################################
     - name: Display worker node status
       debug:
