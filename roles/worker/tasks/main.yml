@@ -1,16 +1,21 @@
 ---
 - name: Join Worker Node to Kubernetes Cluster
   block:
+    ###########################################################################
+    # 1. CHECK IF NODE IS ALREADY JOINED
+    ###########################################################################
     - name: Check if node is already joined
       stat:
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf
 
+    ###########################################################################
+    # 2. JOIN WORKER NODE
+    ###########################################################################
     - name: Join to cluster
       block:
         - name: Get join command from first master
-          shell: |
-            kubeadm token create --print-join-command
+          shell: kubeadm token create --print-join-command
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: join_command
@@ -18,8 +23,7 @@
           become: yes
 
         - name: Join worker node to cluster
-          shell: |
-            {{ join_command.stdout }}
+          shell: "{{ join_command.stdout }}"
           register: join_result
           retries: 3
           delay: 10
@@ -30,71 +34,53 @@
 
       when: not kubelet_conf.stat.exists
 
+    ###########################################################################
+    # 3. VERIFY NODE HAS JOINED (RUNS ON MASTER)
+    ###########################################################################
     - name: Verify node has joined
       block:
-        - name: Wait for kubelet to start
-          wait_for:
-            port: 10250
-            timeout: 300
-          ignore_errors: true
-
-        - name: Create kubeconfig directory
-          file:
-            path: "{{ ansible_env.HOME }}/.kube"
-            state: directory
-            mode: '0755'
-      rescue:
-        - name: Kubelet check failed - continue anyway
-          debug:
-            msg: "Kubelet port check failed, but continuing with labeling..."
-          ignore_errors: true
-
-    - name: Label worker node
-      block:
-        - name: DEBUG - Confirm labeling block is executing
-          debug:
-            msg: "Starting to label worker node {{ inventory_hostname }}"
-
-        - name: Get kubeconfig for commands
+        - name: Wait for worker node to register with API server
           shell: |
-            for i in {1..30}; do
-              if kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get nodes &>/dev/null; then
-                echo "ready"
-                break
-              fi
-              sleep 5
-            done
-          register: kubelet_ready
-          changed_when: false
+            kubectl get node {{ inventory_hostname }} --no-headers
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: node_registered
+          until: node_registered.rc == 0
+          retries: 30
+          delay: 10
+          delegate_to: "{{ groups['masters'][0] }}"
 
-        - name: Wait for node to be ready in cluster
+        - name: Wait for node to become Ready
           shell: |
-            kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+            kubectl get node {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: node_ready
           until: node_ready.stdout == "True"
           retries: 30
           delay: 10
-          changed_when: false
-          ignore_errors: true
           delegate_to: "{{ groups['masters'][0] }}"
 
+    ###########################################################################
+    # 4. LABEL WORKER NODE (AFTER READY)
+    ###########################################################################
+    - name: Label worker node
+      block:
         - name: Label worker node with worker role
           shell: |
             kubectl label node {{ inventory_hostname }} node-role.kubernetes.io/worker=worker --overwrite
           environment:
             KUBECONFIG: /etc/kubernetes/admin.conf
           register: label_result
-          changed_when: false
-          ignore_errors: true
           delegate_to: "{{ groups['masters'][0] }}"
 
         - name: Display node labeling result
           debug:
             msg: "Worker {{ inventory_hostname }} labeling: {{ label_result.stdout | default('No output') }}"
-          ignore_errors: true
 
+    ###########################################################################
+    # 5. FINAL STATUS
+    ###########################################################################
     - name: Display worker node status
       debug:
-        msg: "Worker node {{ inventory_hostname }} has been joined to the cluster"
+        msg: "Worker node {{ inventory_hostname }} has been successfully joined and labeled."
