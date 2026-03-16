@@ -1,0 +1,38 @@
+---
+###############################################################################
+# WORKER-JOIN ROLE: Worker node operations (runs on worker nodes)
+###############################################################################
+
+- name: Join Worker Node to Kubernetes Cluster
+  block:
+    ###########################################################################
+    # 1. CHECK IF NODE IS ALREADY JOINED
+    ###########################################################################
+    - name: Check if node is already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    ###########################################################################
+    # 2. GET JOIN COMMAND AND JOIN WORKER NODE
+    ###########################################################################
+    - name: Get join command and join worker node
+      block:
+        - name: Get join command from master
+          shell: kubeadm token create --print-join-command
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: join_command
+          delegate_to: "{{ groups['masters'][0] }}"
+
+        - name: Join worker node to cluster
+          shell: "{{ join_command.stdout }} --v=5"
+          register: join_result
+          retries: 3
+          delay: 10
+
+        - name: Display join result
+          debug:
+            msg: "{{ join_result.stdout }}"
+
+      when: not kubelet_conf.stat.exists

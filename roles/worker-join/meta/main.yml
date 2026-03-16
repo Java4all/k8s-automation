@@ -1,0 +1,8 @@
+---
+###############################################################################
+# Role Metadata
+###############################################################################
+# worker-join has no dependencies
+# This role can be called independently
+
+dependencies: []

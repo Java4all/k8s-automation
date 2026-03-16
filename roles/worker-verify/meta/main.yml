@@ -1,0 +1,11 @@
+---
+###############################################################################
+# Role Dependencies
+###############################################################################
+# worker-verify requires worker-join to have run first
+# This ensures:
+# - Node is joined to cluster before verification
+# - If worker-verify is called independently, worker-join runs automatically
+
+dependencies:
+  - role: worker-join

@@ -215,7 +215,6 @@
           Deploying Worker Node: {{ inventory_hostname }}
           IP: {{ hostvars[inventory_hostname]['ansible_facts']['default_ipv4']['address'] }}
 
-  tasks:
     - name: Verify first master is ready for worker joining
       block:
         - name: Check if first master has admin.conf
@@ -236,47 +235,15 @@
           delay: 5
           delegate_to: "{{ groups['masters'][0] }}"
           become: yes
-    
-    - name: Check if already joined
-      stat:
-        path: /etc/kubernetes/kubelet.conf
-      register: kubelet_conf
 
-    - name: Get join command from first master
-      block:
-        - name: Get updated join command
-          shell: |
-            kubeadm token create --print-join-command
-          environment:
-            KUBECONFIG: /etc/kubernetes/admin.conf
-          register: join_command
-          delegate_to: "{{ groups['masters'][0] }}"
-          become: yes
-
-        - name: Join worker node
-          shell: |
-            {{ join_command.stdout }}
-          register: join_result
-          retries: 3
-          delay: 10
-
-        - name: Display join result
-          debug:
-            msg: "{{ join_result.stdout }}"
-
-      when: not kubelet_conf.stat.exists
-
-    - name: Wait for worker to be ready
-      shell: |
-        kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-      environment:
-        KUBECONFIG: /etc/kubernetes/admin.conf
-      register: worker_ready
-      until: worker_ready.stdout == "True"
-      retries: 30
-      delay: 10
-      ignore_errors: yes
-      delegate_to: "{{ groups['masters'][0] }}"
+  roles:
+    # worker-join: Join worker node to cluster (runs on worker)
+    # worker-verify: Verify and label (runs on master, depends on worker-join)
+    # Dependency is declared in roles/worker-verify/meta/main.yml
+    - role: worker-join
+      tags: [worker, join]
+    - role: worker-verify
+      tags: [worker, verify, label]
 
 - name: Post-deployment verification
   hosts: "{{ groups['masters'][0] }}"

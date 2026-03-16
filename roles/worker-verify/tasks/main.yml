@@ -1,0 +1,52 @@
+---
+###############################################################################
+# WORKER-VERIFY ROLE: Master operations (verify and label - runs on master)
+###############################################################################
+
+- name: Verify Worker Node and Apply Label
+  delegate_to: "{{ groups['masters'][0] }}"
+  block:
+    ###########################################################################
+    # 1. VERIFY NODE HAS JOINED
+    ###########################################################################
+    - name: Wait for worker node to register with API server
+      shell: kubectl get node {{ inventory_hostname }} --no-headers
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: node_registered
+      until: node_registered.rc == 0
+      retries: 30
+      delay: 10
+
+    - name: Wait for node to become Ready
+      shell: |
+        kubectl get node {{ inventory_hostname }} \
+          -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: node_ready
+      until: "'True' in node_ready.stdout"
+      retries: 30
+      delay: 10
+
+    ###########################################################################
+    # 2. LABEL WORKER NODE
+    ###########################################################################
+    - name: Label worker node with worker role
+      shell: |
+        kubectl label node {{ inventory_hostname }} \
+          node-role.kubernetes.io/worker=worker --overwrite
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: label_result
+
+    - name: Display labeling result
+      debug:
+        msg: "{{ label_result.stdout }}"
+
+    ###########################################################################
+    # 3. FINAL STATUS
+    ###########################################################################
+    - name: Display worker node status
+      debug:
+        msg: "Worker node {{ inventory_hostname }} joined and labeled successfully"
