@@ -1,52 +1,75 @@
-# Kubernetes Cluster Configuration
-# This file defines all parameters for k8s cluster deployment
+# ============================================================================
+# Kubernetes Cluster Configuration - v1.34
+# ============================================================================
+# This file defines all parameters for automated k8s cluster deployment
+# 
+# ROLES DEPLOYED:
+#   Master Nodes:    kubeadm init, Calico CNI, RBAC setup
+#   Worker Nodes:    worker-join (join cluster) + worker-verify (verify & label)
+#   All Nodes:       common (prerequisites), containerd, kubernetes packages
+#
+# NETWORK:
+#   Pod Network:     Calico (supports network policies)
+#   Service Network: Standard k8s service CIDR
+#
+# FEATURES:
+#   ✓ Multi-master control plane support
+#   ✓ Calico CNI with custom resource configuration
+#   ✓ SSH key per node (supports different keys for different nodes)
+#   ✓ RBAC and security baseline
+#   ✓ Proxy configuration support
+#   ✓ Health checks and verification
+# ============================================================================
 
 cluster:
-  name: "production-k8s"
-  environment: "prod"  # dev, staging, prod
-  k8s_version: "1.34"
+  # Basic Cluster Information
+  name: "production-k8s"                    # Cluster name
+  environment: "prod"                       # Environment: dev, staging, prod
+  k8s_version: "1.34"                       # Kubernetes version (1.30+)
   
   # Control Plane Configuration
   control_plane:
-    endpoint_vip: "172.23.60.153"  # F5 VIP pointing to masters
-    endpoint_port: 6443
+    endpoint_vip: "172.23.60.153"           # VIP endpoint for API server (F5, HAProxy, etc.)
+    endpoint_port: 6443                     # API server port
+    # Note: For multi-master, VIP should resolve to all masters
+    #       Ensure load balancer is configured before deployment
 
   # Network Configuration
   networking:
-    pod_cidr: "10.0.68.0/21"        # Pod network CIDR
-    service_cidr: "10.0.76.0/22"    # Service network CIDR (optional, defaults to 10.0.0.0/24)
+    pod_cidr: "10.0.68.0/21"                # Pod CIDR (assigned to Calico)
+    service_cidr: "10.0.76.0/22"            # Service CIDR (cluster IPs)
     
     # Network Mode Configuration
-    mode: "dhcp"                     # "dhcp" (Cloud/Azure) or "static" (On-premise)
+    mode: "dhcp"                            # "dhcp" (Cloud/Azure) or "static" (On-premise)
     
     # DHCP Configuration (used when mode: dhcp)
     dhcp:
-      enabled: true                  # Enable DHCP for IP assignment
-      override_dns: true             # Override DHCP DNS with custom servers
+      enabled: true                         # Enable DHCP for IP assignment
+      override_dns: true                    # Override DHCP DNS with custom servers
     
     # Static IP Configuration (used when mode: static)
     static:
-      enabled: false                 # Set to true for static IP configuration
-      # Note: Static IPs are set per-node in the nodes section below
-      gateway: "10.0.32.1"           # Default gateway for static configuration
+      enabled: false                        # Set to true for static IP configuration
+      gateway: "10.0.32.1"                  # Default gateway for static configuration
+      # Note: Per-node static IPs are configured in the nodes section below
     
-    # DNS Configuration (set enabled: false to skip DNS configuration)
+    # DNS Configuration
     dns:
-      enabled: true                  # Set to false if VMs already configured
+      enabled: true                         # Skip if VMs already configured
       servers:
-        - "8.8.8.8"
+        - "8.8.8.8"                         # Google DNS
         - "8.8.4.4"
     
-    # NTP Configuration (set enabled: false to skip NTP configuration)
+    # NTP Configuration
     ntp:
-      enabled: true                  # Set to false if VMs already configured
+      enabled: true                         # Skip if VMs already configured
       servers:
         - "0.ubuntu.pool.ntp.org"
         - "1.ubuntu.pool.ntp.org"
 
-  # Proxy Configuration (MANDATORY)
+  # Proxy Configuration (MANDATORY - set enabled: false if no proxy)
   proxy:
-    enabled: true
+    enabled: true                           # Set to false if no proxy required
     http_proxy: "http://10.0.0.254:8080"
     https_proxy: "http://10.0.0.254:8080"
     no_proxy_list:
@@ -61,83 +84,264 @@ cluster:
       - ".cluster"
       - "127.0.0.0/8"
 
-  # Calico Configuration
+  # Calico CNI Configuration
   calico:
-    version: "v3.31.3"
-    pool_cidr: "10.0.68.0/21"  # Should match pod_cidr
+    version: "v3.31.3"                      # Calico version (must match k8s compatibility)
+    pool_cidr: "10.0.68.0/21"               # IMPORTANT: Must match pod_cidr!
+    # Calico deployment includes:
+    #   - IP address management
+    #   - Network policy support
+    #   - BGP routing (optional)
+    #   - CSI plugins for persistent volumes
 
-# Nodes Configuration
+# ============================================================================
+# NODES CONFIGURATION
+# ============================================================================
+# Each node requires:
+#   - name:         Ansible inventory name (short hostname)
+#   - hostname:     FQDN or full hostname
+#   - ip:           Node IP address
+#   - netmask:      Netmask for static IP (if using static mode)
+#   - role:         "master" or "worker"
+#   - ssh_key_file: Path to SSH private key for this node
+#
+# SSH Key Strategy:
+#   - Each node can have its own SSH key (recommended for security)
+#   - Keys path is relative to where ansible-playbook is run from
+#   - Ensure keys have correct permissions (chmod 600)
+#   - Keys should not have passphrases (or configure ssh-agent)
+
 nodes:
-  # Master Nodes (Control Plane)
+  # ========================================================================
+  # MASTER NODES (Control Plane)
+  # ========================================================================
+  # Deploy order: First master initializes cluster, then additional masters join
+  # 
+  # First Master (index 0):
+  #   - Runs kubeadm init
+  #   - Creates cluster certificates
+  #   - Deploys kube-apiserver, kube-controller-manager, kube-scheduler
+  #   - Deploys coredns, etcd
+  #   - Sets up RBAC
+  #
+  # Additional Masters (index 1+):
+  #   - Join as control plane nodes
+  #   - Share etcd and other control plane components
+  #   - Can be added later for HA
+  
   masters:
-    - name: "vmm1"
-      hostname: "vmm1"
-      ip: "10.0.32.10"
-      netmask: "255.255.240.0"      # /20
+    - name: "vmm1"                          # Ansible inventory name (unique)
+      hostname: "vmm1.k8s.local"            # FQDN
+      ip: "10.0.32.10"                      # Node IP
+      netmask: "255.255.240.0"              # /20
       role: "master"
-      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
+      ssh_key_file: "/path/to/master-key.pem"  # Private key for SSH
+      # Note: First master initializes the cluster, others join it
       
     - name: "vmm2"
-      hostname: "vmm2"
+      hostname: "vmm2.k8s.local"
       ip: "10.0.32.11"
-      netmask: "255.255.240.0"      # /20
+      netmask: "255.255.240.0"              # /20
       role: "master"
-      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
+      ssh_key_file: "/path/to/master-key.pem"
+      # Note: This master will join vmm1 as control plane node
       
     - name: "vmm3"
-      hostname: "vmm3"
+      hostname: "vmm3.k8s.local"
       ip: "10.0.32.12"
-      netmask: "255.255.240.0"      # /20
+      netmask: "255.255.240.0"              # /20
       role: "master"
-      ssh_key_file: "/path/to/master-key.pem"  # SSH private key for this master
+      ssh_key_file: "/path/to/master-key.pem"
+      # Note: This master will join vmm1 as control plane node
 
-  # Worker Nodes
+  # ========================================================================
+  # WORKER NODES
+  # ========================================================================
+  # Worker deployment is split into two roles for clean separation:
+  #
+  # Role 1: worker-join (runs on WORKER NODE)
+  #   ✓ Checks if node already joined
+  #   ✓ Gets join command from master
+  #   ✓ Executes join on worker node
+  #   ✓ Tags: [worker, join]
+  #
+  # Role 2: worker-verify (runs on MASTER NODE, delegated)
+  #   ✓ Waits for node to register with API server (30 retries, 10s delay)
+  #   ✓ Waits for node to become Ready (30 retries, 10s delay)
+  #   ✓ Applies worker role label (node-role.kubernetes.io/worker=worker)
+  #   ✓ Tags: [worker, verify, label]
+  #
+  # Dependency: worker-verify depends on worker-join (declared in meta/main.yml)
+  #
+  # Usage:
+  #   - Full deployment:    -t worker
+  #   - Only join:          -t worker,join
+  #   - Only verify/label:  -t worker,verify,label
+  
   workers:
-    - name: "vmw1"
-      hostname: "vmw1"
-      ip: "10.0.32.2"
-      netmask: "255.255.240.0"      # /20
+    - name: "vmw1"                          # Ansible inventory name (unique)
+      hostname: "vmw1.k8s.local"            # FQDN
+      ip: "10.0.32.2"                       # Node IP
+      netmask: "255.255.240.0"              # /20
       role: "worker"
-      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
+      ssh_key_file: "/path/to/worker-key.pem"  # Private key for SSH
+      # Will be labeled as: node-role.kubernetes.io/worker=worker
       
     - name: "vmw2"
-      hostname: "vmw2"
+      hostname: "vmw2.k8s.local"
       ip: "10.0.32.3"
-      netmask: "255.255.240.0"      # /20
+      netmask: "255.255.240.0"              # /20
       role: "worker"
-      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
+      ssh_key_file: "/path/to/worker-key.pem"
+      # Will be labeled as: node-role.kubernetes.io/worker=worker
       
     - name: "vmw3"
-      hostname: "vmw3"
+      hostname: "vmw3.k8s.local"
       ip: "10.0.32.4"
-      netmask: "255.255.240.0"      # /20
+      netmask: "255.255.240.0"              # /20
       role: "worker"
-      ssh_key_file: "/path/to/worker-key.pem"  # SSH private key for this worker
+      ssh_key_file: "/path/to/worker-key.pem"
+      # Will be labeled as: node-role.kubernetes.io/worker=worker
 
-# System Configuration
+# ============================================================================
+# SYSTEM CONFIGURATION
+# ============================================================================
 system:
-  os: "Ubuntu 24.04.3 LTS"
-  timezone: "UTC"
-  disable_apparmor: true
-  disable_swap: true
+  os: "Ubuntu 24.04.4 LTS"                  # Operating system
+  timezone: "UTC"                           # System timezone
+  disable_apparmor: true                    # Disable AppArmor for k8s
+  disable_swap: true                        # Required by kubelet
   
-# Container Runtime
+  # Sysctl parameters applied by 'common' role:
+  #   - net.bridge.bridge-nf-call-iptables = 1
+  #   - net.ipv4.ip_forward = 1
+  #   - kernel.modules.overlay module loaded
+  #   - br_netfilter module loaded
+
+# ============================================================================
+# CONTAINER RUNTIME
+# ============================================================================
 container_runtime:
-  engine: "containerd"
-  docker_enabled: true  # Install docker.io
-  systemd_cgroup: true
+  engine: "containerd"                      # "containerd" (recommended) or "docker"
+  docker_enabled: true                      # Install docker.io for tools
+  systemd_cgroup: true                      # Use systemd cgroup driver
+  
+  # Deployed by:
+  #   - 'docker' role: docker.io installation
+  #   - 'containerd' role: containerd installation + configuration
+  #   - Both are installed, containerd is primary k8s runtime
 
-# SSH/Access Configuration
+# ============================================================================
+# SSH / ACCESS CONFIGURATION
+# ============================================================================
 ssh:
-  user: "ubuntu"
-  key_path: "/root/.ssh/id_rsa"  # Path on GitLab runner
-  port: 22
-  timeout: 300
-  retries: 3
+  user: "ubuntu"                            # SSH user for cloud VMs
+  key_path: "/root/.ssh/id_rsa"             # Default SSH key (GitLab runner path)
+  port: 22                                  # SSH port
+  timeout: 300                              # Connection timeout (seconds)
+  retries: 3                                # Connection retries
+  
+  # Note: Per-node ssh_key_file in nodes section overrides this default
+  # Path is relative to where ansible-playbook is executed
 
-# Deployment Options
+# ============================================================================
+# DEPLOYMENT OPTIONS & TUNING
+# ============================================================================
 deployment:
-  skip_verification: false
-  health_check_timeout: 600  # seconds
-  calico_wait_timeout: 300   # seconds for calico pods to be ready
-  parallel_workers: 3        # number of workers to deploy in parallel
+  # Verification Options
+  skip_verification: false                  # Set true to skip post-deployment checks
+  
+  # Timeout Configuration
+  health_check_timeout: 600                 # Health check timeout (seconds)
+  calico_wait_timeout: 300                  # Wait for Calico pods (seconds)
+  
+  # Parallel Deployment
+  parallel_workers: 3                       # Max workers to deploy in parallel
+  # Note: Masters always deploy serially (serial: 1) for stability
+  
+  # Deployment Notes:
+  #   - Total deployment time: ~15-30 minutes (depending on infrastructure)
+  #   - First master takes longest (kubeadm init + Calico deployment)
+  #   - Additional masters: ~5-10 minutes each
+  #   - Each worker: ~2-5 minutes
+  #   - Verification: ~2-3 minutes
+
+# ============================================================================
+# ROLE DEPENDENCIES
+# ============================================================================
+#
+# MASTER ROLE:
+#   ├─ common (prerequisites)
+#   ├─ docker (container runtime)
+#   ├─ containerd (k8s runtime)
+#   ├─ kubernetes (kubeadm, kubelet, kubectl)
+#   └─ master (kubeadm init, RBAC setup)
+#
+# CALICO ROLE:
+#   └─ calico (network policy controller)
+#
+# WORKER ROLES (sequential):
+#   ├─ worker-join (join node to cluster)
+#   └─ worker-verify (depends on worker-join)
+#      ├─ Waits for API registration
+#      ├─ Waits for Ready status
+#      └─ Applies worker role label
+#
+# VERIFICATION ROLE:
+#   └─ verification (health checks)
+#
+# All roles have dependencies declared in roles/*/meta/main.yml
+
+# ============================================================================
+# VERIFYING DEPLOYMENT
+# ============================================================================
+#
+# AFTER DEPLOYMENT COMPLETES:
+#
+# 1. SSH to first master:
+#    ssh ubuntu@10.0.32.10 -i /path/to/master-key.pem
+#
+# 2. Check nodes status:
+#    kubectl get nodes -o wide
+#    # Expected output shows all masters with roles and all workers labeled
+#
+# 3. Check node readiness:
+#    kubectl get nodes
+#    # All nodes should show STATUS: Ready
+#
+# 4. Check Calico deployment:
+#    kubectl get pods -n calico-system
+#    # All pods should be Running
+#
+# 5. Check kube-system:
+#    kubectl get pods -n kube-system
+#    # coredns and other system pods should be Running
+#
+# 6. Test network connectivity:
+#    kubectl run test-pod --image=busybox --rm -it -- ping google.com
+#
+# 7. Check pod CIDR assignments:
+#    kubectl get pods --all-namespaces -o wide
+#    # Pods should have IPs from pod_cidr range (10.0.68.0/21)
+
+# ============================================================================
+# TROUBLESHOOTING
+# ============================================================================
+#
+# NODE NOT JOINING:
+#   - Check worker node ssh connectivity
+#   - Verify master API server is responding: kubectl get nodes
+#   - Check worker-join logs in playbook output
+#
+# NODE NOT BECOMING READY:
+#   - Check Calico pod status: kubectl get pods -n calico-system
+#   - Check kubelet logs: journalctl -u kubelet -n 50
+#   - Verify network connectivity between nodes
+#
+# LABEL NOT APPLIED:
+#   - Verify worker-verify role completed
+#   - Check if node is Ready before labeling
+#   - Manually apply: kubectl label node <name> node-role.kubernetes.io/worker=worker
+#
+# See docs/TROUBLESHOOTING.md for more detailed diagnostics
+
